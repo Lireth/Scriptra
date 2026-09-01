@@ -1,0 +1,62 @@
+{
+  "name": "scriptra",
+  "productName": "Scriptra",
+  "version": "0.1.0",
+  "description": "观笺 - Windows 桌面应用（Electron）",
+  "author": "Scriptra Team",
+  "license": "MIT",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:win": "electron-builder --win",
+    "build:win:portable": "electron-builder --win portable",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.scriptra.desktop",
+    "productName": "Scriptra",
+    "copyright": "Copyright © 2026 Scriptra (观笺)",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/main/**/*",
+      "src/renderer/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "观笺 Scriptra",
+      "uninstallDisplayName": "观笺 Scriptra",
+      "installerLanguages": ["zh_CN", "en_US"]
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    }
+  }
+}

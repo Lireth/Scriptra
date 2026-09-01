@@ -1,0 +1,56 @@
+# ========== 依赖 ==========
+node_modules/
+
+# ========== 构建产物 ==========
+# electron-builder 输出目录（见 package.json build.directories.output）
+dist/
+# 其他常见打包输出位置（如切换工具时使用）
+out/
+release/
+*.asar
+
+# 注意：build/ 目录存放应用图标等资源，需要提交，勿整目录忽略
+
+# ========== 日志 ==========
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+
+# ========== Electron / 构建缓存 ==========
+.electron-cache/
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# ========== 环境变量与本地配置 ==========
+.env
+.env.*
+!.env.example
+
+# ========== 测试与覆盖率 ==========
+coverage/
+
+# ========== 编辑器 / IDE ==========
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ========== 操作系统 ==========
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+# macOS
+.DS_Store
+
+# ========== 其他 ==========
+.trae/
+docs/
