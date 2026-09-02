@@ -8,9 +8,10 @@
 
 import type { Annotation, ReaderStyle } from '../../shared/types'
 import {
-  buildTextCache, globalFromDom, wrapRangeWithMark, type TextCache,
+  buildTextCache, cacheText, findOccurrences, globalFromDom, makeExcerpt, MAX_SEARCH_MARKS,
+  unwrapMarks, wrapRangeWithClass, wrapRangeWithMark, type TextCache,
 } from './common'
-import { registerEngine, type EngineCallbacks, type EnginePayload, type ReaderEngine, type TocEntry } from './types'
+import { registerEngine, type EngineCallbacks, type EnginePayload, type ReaderEngine, type SearchHit, type TocEntry } from './types'
 // @ts-expect-error 第三方 ESM 模块，无类型声明
 import { MOBI } from '../vendor/foliate-mobi.js'
 
@@ -183,6 +184,8 @@ class MobiEngine implements ReaderEngine {
       a { color:#3d6a8f; text-decoration:none; }
       p { margin:0.6em 0; text-align:justify; }
       .scriptra-hl { border-radius:2px; padding:0 1px; }
+      mark.scriptra-search { background:rgba(255,193,7,.4); border-radius:2px; padding:0 1px; }
+      mark.scriptra-search.current { outline:2px solid #e07b39; background:rgba(255,160,0,.55); }
       .scriptra-hl.flash { outline:2px solid #e07b39; animation:scriptra-flash 1.2s ease-out; }
       @keyframes scriptra-flash {
         0% { box-shadow:0 0 0 4px rgba(224,123,57,0.6); }
@@ -379,6 +382,77 @@ class MobiEngine implements ReaderEngine {
 
   clearSelection(): void {
     try { this.iframe?.contentWindow?.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
+  }
+
+  /* ------------------------------ 书内搜索 ------------------------------ */
+
+  private searchSeq = 0
+  private searchQuery = ''
+
+  async search(query: string, onProgress?: (done: number, total: number) => void): Promise<SearchHit[]> {
+    const seq = ++this.searchSeq
+    this.searchQuery = query
+    this.clearSearchMarks()
+    const hits: SearchHit[] = []
+    const book = this.book
+    const needle = query.toLowerCase()
+    if (!book || !needle) return hits
+    const total = this.chapterCount
+    for (let i = 0; i < total; i++) {
+      if (this.destroyed || seq !== this.searchSeq) return hits
+      try {
+        const d = await book.sections[i].createDocument()
+        if (this.destroyed || seq !== this.searchSeq) return hits
+        if (d.body) {
+          const text = cacheText(buildTextCache(d.body))
+          for (const [m, occ] of findOccurrences(text, needle).entries()) {
+            hits.push({
+              chapter: i, matchIndex: m,
+              label: `第 ${i + 1} / ${total} 节`,
+              excerpt: makeExcerpt(text, occ.start, occ.end),
+            })
+          }
+        }
+      } catch { /* 单节解析失败跳过 */ }
+      onProgress?.(i + 1, total)
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    return hits
+  }
+
+  async goToHit(hit: SearchHit): Promise<void> {
+    if (hit.chapter !== this.current) await this.showChapter(hit.chapter, 0)
+    this.highlightSearchHits(hit.matchIndex)
+  }
+
+  clearSearch(): void {
+    this.searchSeq++
+    this.searchQuery = ''
+    this.clearSearchMarks()
+  }
+
+  private clearSearchMarks(): void {
+    const doc = this.iframe?.contentDocument
+    if (doc) unwrapMarks(doc, 'mark.scriptra-search')
+  }
+
+  /** 在当前章节 DOM 内套上搜索标记并滚动到指定序号的命中 */
+  private highlightSearchHits(focusIndex: number): void {
+    const doc = this.iframe?.contentDocument
+    if (!doc?.body || !this.searchQuery) return
+    this.clearSearchMarks()
+    let cache = buildTextCache(doc.body)
+    const occs = findOccurrences(cacheText(cache), this.searchQuery.toLowerCase(), MAX_SEARCH_MARKS)
+    const focusAt = Math.min(focusIndex, occs.length - 1)
+    let focusMark: HTMLElement | null = null
+    for (const [i, occ] of occs.entries()) {
+      const mark = wrapRangeWithClass(doc, cache, occ.start, occ.end,
+        i === focusAt ? 'scriptra-search current' : 'scriptra-search')
+      // splitText 改变文本节点，逐个重建保证后续偏移有效
+      cache = buildTextCache(doc.body)
+      if (i === focusAt) focusMark = mark
+    }
+    focusMark?.scrollIntoView({ block: 'center' })
   }
 
   focusAnnotation(annId: string): boolean {

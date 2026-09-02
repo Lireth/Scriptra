@@ -203,6 +203,7 @@ export function showHelpDialog(): void {
     ['Ctrl + D', '添加书签'],
     ['Ctrl + T', '目录面板'],
     ['Ctrl + B', '批注面板'],
+    ['Ctrl + F', '书内搜索'],
     ['Ctrl + +/-', '字号调整'],
     ['Esc', '关闭面板 / 弹窗'],
   ]

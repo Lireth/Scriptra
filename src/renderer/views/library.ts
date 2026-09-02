@@ -38,7 +38,6 @@ export class LibraryView {
   private books: Book[] = []
   private stats: LibraryStats | null = null
   private selectedId: string | null = null
-  private coverCache = new Map<string, string>()
   private loadedCount = 0
   private loadSeq = 0
   private hasMore = false
@@ -354,24 +353,19 @@ export class LibraryView {
         const id = card.dataset.id
         const coverEl = card.querySelector('.cover-img') as HTMLImageElement | null
         if (!id || !coverEl) continue
-        void this.loadCover(id).then((url) => {
-          coverEl.src = url
-        })
+        // 封面经 cover:// 协议直读磁盘（Chromium 负责缓存），加载失败回退占位图
+        const book = this.books.find((b) => b.id === id)
+        coverEl.onerror = () => {
+          coverEl.onerror = null
+          coverEl.src = placeholderCover(book?.title ?? '', book?.author ?? '')
+        }
+        coverEl.src = `cover://${id}`
       }
-    }, { rootMargin: '300px' })
+    }, { rootMargin: '150px' })
 
     for (const book of this.books) {
       container.appendChild(this.buildCard(book))
     }
-  }
-
-  private async loadCover(id: string): Promise<string> {
-    if (this.coverCache.has(id)) return this.coverCache.get(id)!
-    const book = this.books.find((b) => b.id === id)
-    const dataUrl = await window.scriptra.cover(id)
-    const url = dataUrl || placeholderCover(book?.title ?? '', book?.author ?? '')
-    this.coverCache.set(id, url)
-    return url
   }
 
   private buildCard(book: Book): HTMLElement {
@@ -481,33 +475,52 @@ export class LibraryView {
     totalHint: number,
   ): Promise<void> {
     const bar = document.getElementById('import-progress')
+    let cancelled = false
+    // 进度条带取消按钮：大批量导入可中断（主进程在文件边界/PDF 逐页响应）
+    bar?.classList.remove('hidden')
+    if (bar) {
+      bar.innerHTML = ''
+      const label = el('span', 'import-progress-label')
+      const cancelBtn = el('button', 'btn btn-small', '取消')
+      cancelBtn.onclick = () => {
+        cancelled = true
+        cancelBtn.disabled = true
+        cancelBtn.textContent = '取消中…'
+        void window.scriptra.cancelImport()
+      }
+      bar.appendChild(label)
+      bar.appendChild(cancelBtn)
+    }
+    const label = bar?.querySelector('.import-progress-label')
     const off = window.scriptra.onImportProgress((p) => {
-      if (!bar) return
-      bar.classList.remove('hidden')
       const name = p.path.split(/[\\/]/).pop() ?? p.path
       if (p.stage === 'pdf-text') {
-        bar.textContent = `正在提取全文（${p.current} / ${p.total} 页）：${name}`
+        if (label) label.textContent = `正在提取全文（${p.current} / ${p.total} 页）：${name}`
         return
       }
       const total = p.total || totalHint
-      bar.textContent = total
-        ? `正在导入 ${p.current} / ${total}：${name}`
-        : `正在导入：${name}`
+      if (label) {
+        label.textContent = total ? `正在导入 ${p.current} / ${total}：${name}` : `正在导入：${name}`
+      }
     })
     try {
       const r = await fn()
-      const msg = `导入完成：成功 ${r.imported}，跳过 ${r.skipped}（重复），失败 ${r.failed.length}`
+      const head = cancelled ? '导入已取消' : '导入完成'
+      const msg = `${head}：成功 ${r.imported}，跳过 ${r.skipped}（重复），失败 ${r.failed.length}`
       if (r.failed.length) {
         toast(`${msg}，首个失败原因：${r.failed[0].reason}`, 'warn', 5000)
       } else {
-        toast(msg, 'success')
+        toast(msg, cancelled ? 'warn' : 'success')
       }
       await this.refresh()
     } catch (e) {
       toast(`导入失败：${e instanceof Error ? e.message : String(e)}`, 'error')
     } finally {
       off()
-      bar?.classList.add('hidden')
+      if (bar) {
+        bar.classList.add('hidden')
+        bar.innerHTML = ''
+      }
     }
   }
 
@@ -516,7 +529,6 @@ export class LibraryView {
     if (!result) return
     await withToast('保存', async () => {
       await window.scriptra.updateBook(book.id, result)
-      this.coverCache.delete(book.id)
       await this.refresh()
     }, () => '书籍信息已更新')
   }
@@ -525,7 +537,6 @@ export class LibraryView {
     const ok = await confirmDialog(`确定删除《${book.title}》吗？\n相关的书签、笔记和文件副本将一并移除。`)
     if (!ok) return
     await withToast('删除', async () => {
-      this.coverCache.delete(book.id)
       await window.scriptra.removeBooks([book.id])
       await this.refresh()
     }, () => '已删除')

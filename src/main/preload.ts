@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('scriptra', {
   /* ------------------------------ 书库 ------------------------------ */
   importFiles: (paths: string[]) => invoke(IPC.LibraryImport, paths),
   scanFolder: (folder: string) => invoke(IPC.LibraryScan, folder),
+  cancelImport: () => invoke(IPC.LibraryCancelImport),
   /** 拖拽落下的 File 对象转本地路径（必须在 preload 侧调用 webUtils） */
   pathForFile: (file: File) => webUtils.getPathForFile(file),
   listBooks: (query: unknown) => invoke(IPC.LibraryList, query),
@@ -33,7 +34,6 @@ contextBridge.exposeInMainWorld('scriptra', {
   updateBook: (id: string, patch: unknown) => invoke(IPC.LibraryUpdate, id, patch),
   removeBooks: (ids: string[]) => invoke(IPC.LibraryRemove, ids),
   stats: () => invoke(IPC.LibraryStats),
-  cover: (id: string) => invoke(IPC.LibraryCover, id),
   continueReading: () => invoke(IPC.LibraryContinue),
 
   /* ------------------------------ 阅读 ------------------------------ */

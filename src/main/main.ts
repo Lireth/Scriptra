@@ -9,12 +9,14 @@
  * - 数据库与 IPC 初始化
  */
 
-import { app, BrowserWindow, dialog, Menu, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, net, protocol, session, shell } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IPC } from '../shared/types'
 import { log } from './logger'
 import { closeDb, getDb } from './db/database'
+import { getBookPaths } from './db/books'
 import { registerIpcHandlers } from './ipc/register'
 import { libraryDir, coversDir, requestQuitImports } from './services/library'
 
@@ -61,6 +63,27 @@ function ebookPathsFromArgv(argv: string[]): string[] {
 }
 
 /* ------------------------------ 安全策略 ------------------------------ */
+
+// app ready 前：注册封面自定义协议（绕过 CSP，缓存/生命周期交给 Chromium 管理）
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'cover', privileges: { standard: true, bypassCSP: true } },
+])
+
+/** 封面协议：cover://<bookId> 直接读磁盘封面文件，取代逐本 base64 IPC */
+function registerCoverProtocol(): void {
+  protocol.handle('cover', (request) => {
+    const id = new URL(request.url).host
+    // 书籍 id 为 UUID，防止借道协议读取任意路径
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) {
+      return new Response(null, { status: 400 })
+    }
+    const paths = getBookPaths(id)
+    if (!paths?.coverPath || !fs.existsSync(paths.coverPath)) {
+      return new Response(null, { status: 404 })
+    }
+    return net.fetch(pathToFileURL(paths.coverPath).toString())
+  })
+}
 
 /**
  * 为页面注入严格的内容安全策略：
@@ -214,6 +237,7 @@ app.whenReady().then(() => {
   }
 
   configureSecurity()
+  registerCoverProtocol()
   registerIpcHandlers()
 
   if (!isDev) {

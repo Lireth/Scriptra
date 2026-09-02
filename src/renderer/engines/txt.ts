@@ -8,9 +8,10 @@
 import type { Annotation, ReaderStyle } from '../../shared/types'
 import { escapeHtml } from '../util'
 import {
-  buildTextCache, READER_THEMES, wrapRangeWithMark, type TextCache,
+  buildTextCache, cacheText, findOccurrences, makeExcerpt, MAX_SEARCH_MARKS,
+  READER_THEMES, unwrapMarks, wrapRangeWithClass, wrapRangeWithMark, type TextCache,
 } from './common'
-import { registerEngine, type EngineCallbacks, type EnginePayload, type ReaderEngine, type TocEntry } from './types'
+import { registerEngine, type EngineCallbacks, type EnginePayload, type ReaderEngine, type SearchHit, type TocEntry } from './types'
 
 class TxtEngine implements ReaderEngine {
   private container!: HTMLElement
@@ -216,6 +217,70 @@ class TxtEngine implements ReaderEngine {
 
   clearSelection(): void {
     try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
+  }
+
+  /* ------------------------------ 书内搜索 ------------------------------ */
+
+  private searchSeq = 0
+  private searchQuery = ''
+
+  async search(query: string, onProgress?: (done: number, total: number) => void): Promise<SearchHit[]> {
+    const seq = ++this.searchSeq
+    this.searchQuery = query
+    this.clearSearchMarks()
+    const hits: SearchHit[] = []
+    const needle = query.toLowerCase()
+    if (!needle) return hits
+    const total = this.chapterCount
+    for (let i = 0; i < total; i++) {
+      if (this.destroyed || seq !== this.searchSeq) return hits
+      const text = this.chapters[i] ?? ''
+      for (const [m, occ] of findOccurrences(text, needle).entries()) {
+        hits.push({
+          chapter: i, matchIndex: m,
+          label: `第 ${i + 1} / ${total} 章`,
+          excerpt: makeExcerpt(text, occ.start, occ.end),
+        })
+      }
+      onProgress?.(i + 1, total)
+      // 章节在内存中遍历很快，定期让步仅为刷新进度 UI
+      if (i % 50 === 49) await new Promise((r) => setTimeout(r, 0))
+    }
+    return hits
+  }
+
+  async goToHit(hit: SearchHit): Promise<void> {
+    if (hit.chapter !== this.current) await this.showChapter(hit.chapter, 0)
+    this.highlightSearchHits(hit.matchIndex)
+  }
+
+  clearSearch(): void {
+    this.searchSeq++
+    this.searchQuery = ''
+    this.clearSearchMarks()
+  }
+
+  private clearSearchMarks(): void {
+    if (this.scroller) unwrapMarks(this.scroller, 'mark.scriptra-search')
+  }
+
+  /** 在当前章节 DOM 内套上搜索标记并滚动到指定序号的命中 */
+  private highlightSearchHits(focusIndex: number): void {
+    const content = this.scroller.querySelector('.txt-content')
+    if (!content || !this.searchQuery) return
+    this.clearSearchMarks()
+    let cache = buildTextCache(content)
+    const occs = findOccurrences(cacheText(cache), this.searchQuery.toLowerCase(), MAX_SEARCH_MARKS)
+    const focusAt = Math.min(focusIndex, occs.length - 1)
+    let focusMark: HTMLElement | null = null
+    for (const [i, occ] of occs.entries()) {
+      const mark = wrapRangeWithClass(document, cache, occ.start, occ.end,
+        i === focusAt ? 'scriptra-search current' : 'scriptra-search')
+      // splitText 改变文本节点，逐个重建保证后续偏移有效
+      cache = buildTextCache(content)
+      if (i === focusAt) focusMark = mark
+    }
+    focusMark?.scrollIntoView({ block: 'center' })
   }
 
   focusAnnotation(annId: string): boolean {

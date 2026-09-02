@@ -14,13 +14,13 @@ export interface ScriptraApi {
 
   importFiles(paths: string[]): Promise<ImportOutcome>
   scanFolder(folder: string): Promise<ImportOutcome>
+  cancelImport(): Promise<boolean>
   pathForFile(file: File): string
   listBooks(query: BookQuery): Promise<Book[]>
   getBook(id: string): Promise<Book | null>
   updateBook(id: string, patch: BookUpdatePatch): Promise<Book>
   removeBooks(ids: string[]): Promise<boolean>
   stats(): Promise<LibraryStats>
-  cover(id: string): Promise<string>
   continueReading(): Promise<Book | null>
 
   openBook(id: string): Promise<Omit<OpenBookPayload, 'annotations'> & { annotations?: Annotation[] }>

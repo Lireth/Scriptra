@@ -48,6 +48,10 @@ function sendProgress(sender: WebContents | null, evt: ImportProgressEvent): voi
 let quitRequested = false
 export function requestQuitImports(): void { quitRequested = true }
 
+/** 用户取消标志：当前导入批次在文件边界中止（PDF 单文件内逐页响应） */
+let importCancelled = false
+export function requestCancelImport(): void { importCancelled = true }
+
 /** 导入防重入锁：并发导入会让同一文件绕过 hash 去重检查、重复入库 */
 let importing = false
 
@@ -104,6 +108,8 @@ async function importOne(
     contentIndexed = !!contentText
   } else if (format === 'pdf') {
     const r = await parsePdfFile(filePath, (page, numPages) => {
+      // PDF 逐页提取耗时较长，取消请求即时响应（异常向上传播，本文件按失败计）
+      if (importCancelled) throw new Error('已取消')
       sendProgress(sender, { current: page, total: numPages, path: filePath, stage: 'pdf-text' })
     })
     ;({ title, author } = r.meta)
@@ -167,10 +173,11 @@ async function importOne(
 
 export async function importFiles(paths: string[], sender: WebContents | null): Promise<ImportOutcome> {
   if (importing) {
-    log.warn('已有导入任务在进行中，忽略重复请求')
-    return { imported: 0, skipped: 0, failed: [] }
+    // 明确报错而非静默返回空结果，避免渲染端弹出"成功 0 失败 0"的困惑提示
+    throw new Error('已有导入任务在进行中，请等待完成后再试')
   }
   importing = true
+  importCancelled = false
   try {
     return await runImport(paths, sender)
   } finally {
@@ -182,8 +189,8 @@ async function runImport(paths: string[], sender: WebContents | null): Promise<I
   const outcome: ImportOutcome = { imported: 0, skipped: 0, failed: [] }
   const total = paths.length
   for (let i = 0; i < paths.length; i++) {
-    if (quitRequested) {
-      log.info('应用退出，导入中止')
+    if (quitRequested || importCancelled) {
+      log.info(quitRequested ? '应用退出，导入中止' : '用户取消，导入中止')
       break
     }
     const p = paths[i]
@@ -415,14 +422,4 @@ export function getFileBuffer(bookId: string): ArrayBuffer | null {
   const s = sessions.get(bookId)
   if (!s) return null
   return s.buffer.buffer.slice(s.buffer.byteOffset, s.buffer.byteOffset + s.buffer.byteLength) as ArrayBuffer
-}
-
-/** 封面 data URL（渲染进程网格展示用） */
-export function coverDataUrl(bookId: string): string | null {
-  const paths = getBookPaths(bookId)
-  if (!paths?.coverPath || !fs.existsSync(paths.coverPath)) return null
-  const buf = fs.readFileSync(paths.coverPath)
-  const ext = path.extname(paths.coverPath).toLowerCase()
-  const mime = ext === '.png' ? 'image/png' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
-  return `data:${mime};base64,${buf.toString('base64')}`
 }

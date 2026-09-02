@@ -11,7 +11,7 @@ import {
   el,
 } from '../util'
 import type {
-  EngineCallbacks, EnginePayload, ProgressInfo, ReaderEngine, SelectionInfo, TocEntry,
+  EngineCallbacks, EnginePayload, ProgressInfo, ReaderEngine, SearchHit, SelectionInfo, TocEntry,
 } from './types'
 
 /* ------------------------------ 文本偏移映射 ------------------------------ */
@@ -119,14 +119,15 @@ export function rangeFromOffsets(
 }
 
 /** 在选区外套上高亮标记 */
-export function wrapRangeWithMark(
+function wrapTextOffsets(
   doc: Document,
   cache: TextCache,
-  ann: Annotation,
-): void {
-  const range = rangeFromOffsets(doc, cache, ann.locator.kind === 'text' ? ann.locator.start : 0,
-    ann.locator.kind === 'text' ? ann.locator.end : 0)
-  if (!range) return
+  start: number,
+  end: number,
+  createMark: (doc: Document) => HTMLElement,
+): HTMLElement | null {
+  const range = rangeFromOffsets(doc, cache, start, end)
+  if (!range) return null
 
   const root = range.commonAncestorContainer
   const rootEl = root.nodeType === Node.TEXT_NODE ? root.parentElement! : (root as Element)
@@ -141,6 +142,7 @@ export function wrapRangeWithMark(
     n = walker.nextNode()
   }
 
+  let first: HTMLElement | null = null
   for (const tn of targets) {
     let s = 0
     let e = tn.data.length
@@ -151,16 +153,87 @@ export function wrapRangeWithMark(
     const mid = s > 0 ? tn.splitText(s) : tn
     const right = e - s < mid.data.length ? mid.splitText(e - s) : mid
 
-    const mark = doc.createElement('mark')
-    mark.className = 'scriptra-hl'
-    mark.dataset.ann = ann.id
-    mark.style.backgroundColor = ann.color || '#ffd54d'
-    mark.style.color = 'inherit'
+    const mark = createMark(doc)
     const parent = right.parentNode
     if (!parent) continue
     parent.insertBefore(mark, right)
     mark.appendChild(right)
+    first ??= mark
   }
+  return first
+}
+
+/** 在选区外套上高亮标记（批注回填用） */
+export function wrapRangeWithMark(
+  doc: Document,
+  cache: TextCache,
+  ann: Annotation,
+): void {
+  if (ann.locator.kind !== 'text') return
+  wrapTextOffsets(doc, cache, ann.locator.start, ann.locator.end, (d) => {
+    const mark = d.createElement('mark')
+    mark.className = 'scriptra-hl'
+    mark.dataset.ann = ann.id
+    mark.style.backgroundColor = ann.color || '#ffd54d'
+    mark.style.color = 'inherit'
+    return mark
+  })
+}
+
+/** 搜索高亮：按偏移包裹标记，返回首个标记供滚动定位 */
+export function wrapRangeWithClass(
+  doc: Document,
+  cache: TextCache,
+  start: number,
+  end: number,
+  className: string,
+): HTMLElement | null {
+  return wrapTextOffsets(doc, cache, start, end, (d) => {
+    const mark = d.createElement('mark')
+    mark.className = className
+    return mark
+  })
+}
+
+/* ------------------------------ 书内搜索 ------------------------------ */
+
+/** 单章搜索标记上限：超长章节大量命中时防止逐个重建缓存拖垮 UI */
+export const MAX_SEARCH_MARKS = 200
+
+/** TextCache 拼接全文 */
+export function cacheText(cache: TextCache): string {
+  return cache.nodes.map((n) => n.data).join('')
+}
+
+/** 大小写不敏感查找全部命中（带安全上限，防构造性卡死） */
+export function findOccurrences(
+  text: string,
+  lowerNeedle: string,
+  cap = 2000,
+): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = []
+  if (!lowerNeedle || !text) return out
+  const hay = text.toLowerCase()
+  let i = hay.indexOf(lowerNeedle)
+  while (i >= 0 && out.length < cap) {
+    out.push({ start: i, end: i + lowerNeedle.length })
+    i = hay.indexOf(lowerNeedle, i + lowerNeedle.length)
+  }
+  return out
+}
+
+/** 命中上下文摘录（命中部分用【】标出） */
+export function makeExcerpt(text: string, start: number, end: number, radius = 26): string {
+  const s = Math.max(0, start - radius)
+  const e = Math.min(text.length, end + radius)
+  return (s > 0 ? '…' : '')
+    + text.slice(s, start) + '【' + text.slice(start, end) + '】' + text.slice(end, e)
+    + (e < text.length ? '…' : '')
+}
+
+/** 解除容器内指定标记的包裹 */
+export function unwrapMarks(root: ParentNode, selector: string): void {
+  root.querySelectorAll(selector).forEach((m) => unwrapMark(m as HTMLElement))
 }
 
 /* ------------------------------ 样式 ------------------------------ */
@@ -207,6 +280,8 @@ export function readerStyleCss(style: ReaderStyle): string {
     }
     body.scriptra-body .scriptra-hl { border-radius: 2px; padding: 0 1px; }
     body.scriptra-body .scriptra-hl:hover { filter: brightness(0.94); }
+    body.scriptra-body mark.scriptra-search { background: rgba(255,193,7,.4); color: inherit; border-radius: 2px; padding: 0 1px; }
+    body.scriptra-body mark.scriptra-search.current { outline: 2px solid #e07b39; background: rgba(255,160,0,.55); }
     body.scriptra-body .scriptra-hl.flash {
       outline: 2px solid #e07b39;
       animation: scriptra-flash 1.2s ease-out;
@@ -529,6 +604,85 @@ export abstract class DocEngine implements ReaderEngine {
 
   clearSelection(): void {
     try { this.iwin.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
+  }
+
+  /* ------------------------------ 书内搜索 ------------------------------ */
+
+  private searchSeq = 0
+  protected searchQuery = ''
+
+  /** 单章文本缓存（搜索用；默认解析完整章节 HTML，引擎可覆写轻量实现） */
+  protected async chapterSearchCache(index: number): Promise<TextCache | null> {
+    try {
+      const html = await this.loadChapterHtml(index)
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      return doc.body ? buildTextCache(doc.body) : null
+    } catch {
+      return null
+    }
+  }
+
+  async search(query: string, onProgress?: (done: number, total: number) => void): Promise<SearchHit[]> {
+    const seq = ++this.searchSeq
+    this.searchQuery = query
+    this.clearSearchMarks()
+    const hits: SearchHit[] = []
+    const needle = query.toLowerCase()
+    if (!needle) return hits
+    const total = this.chapterCount
+    for (let i = 0; i < total; i++) {
+      if (this.destroyed || seq !== this.searchSeq) return hits
+      const cache = await this.chapterSearchCache(i)
+      if (this.destroyed || seq !== this.searchSeq) return hits
+      if (cache) {
+        const text = cacheText(cache)
+        for (const [m, occ] of findOccurrences(text, needle).entries()) {
+          hits.push({
+            chapter: i, matchIndex: m,
+            label: `第 ${i + 1} / ${total} 章`,
+            excerpt: makeExcerpt(text, occ.start, occ.end),
+          })
+        }
+      }
+      onProgress?.(i + 1, total)
+      // 让出主线程，保持搜索期间输入与进度响应
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    return hits
+  }
+
+  async goToHit(hit: SearchHit): Promise<void> {
+    if (hit.chapter !== this.current) await this.showChapter(hit.chapter, 0)
+    this.highlightSearchHits(hit.matchIndex)
+  }
+
+  clearSearch(): void {
+    this.searchSeq++
+    this.searchQuery = ''
+    this.clearSearchMarks()
+  }
+
+  private clearSearchMarks(): void {
+    if (this.idoc) unwrapMarks(this.idoc, 'mark.scriptra-search')
+  }
+
+  /** 在当前章节 DOM 内套上搜索标记并滚动到指定序号的命中 */
+  private highlightSearchHits(focusIndex: number): void {
+    const doc = this.idoc
+    if (!doc?.body || !this.searchQuery) return
+    this.clearSearchMarks()
+    this.rebuildTextCache()
+    const occs = findOccurrences(cacheText(this.cache), this.searchQuery.toLowerCase(), MAX_SEARCH_MARKS)
+    const focusAt = Math.min(focusIndex, occs.length - 1)
+    let focusMark: HTMLElement | null = null
+    for (const [i, occ] of occs.entries()) {
+      const mark = wrapRangeWithClass(doc, this.cache, occ.start, occ.end,
+        i === focusAt ? 'scriptra-search current' : 'scriptra-search')
+      // splitText 改变文本节点，逐个重建保证后续偏移有效（与批注回填同模式）
+      this.rebuildTextCache()
+      if (i === focusAt) focusMark = mark
+    }
+    focusMark?.scrollIntoView({ block: 'center' })
   }
 
   focusAnnotation(annId: string): boolean {

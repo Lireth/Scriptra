@@ -27,6 +27,18 @@ export interface TocEntry {
   level: number
 }
 
+/** 书内搜索命中 */
+export interface SearchHit {
+  /** doc 引擎：章节下标；PDF：页码 - 1 */
+  chapter: number
+  /** 命中在章节/页内的序号（用于定位到具体标记） */
+  matchIndex: number
+  /** 位置描述，如 "第 3 / 24 章"、"第 12 / 300 页" */
+  label: string
+  /** 命中上下文摘录 */
+  excerpt: string
+}
+
 export interface EngineCallbacks {
   onProgress(p: ProgressInfo): void
   onSelection(sel: SelectionInfo | null): void
@@ -61,6 +73,12 @@ export interface ReaderEngine {
    * 外壳据此衔接翻章；未实现的引擎（PDF）由外壳沿用翻章语义。
    */
   scrollByScreen?(dir: 1 | -1): Promise<boolean>
+  /** 全书搜索（渐进回报进度）；引擎不实现时书内搜索入口禁用 */
+  search?(query: string, onProgress?: (done: number, total: number) => void): Promise<SearchHit[]>
+  /** 跳转到命中位置：加载章节/页、套上搜索标记并滚动到该命中 */
+  goToHit?(hit: SearchHit): Promise<void>
+  /** 清除全部搜索标记 */
+  clearSearch?(): void
   destroy(): void
   /** 窗口尺寸变化（含最大化/还原）时触发，引擎按需重排 */
   onResize?(): void

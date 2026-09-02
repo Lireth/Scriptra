@@ -8,7 +8,7 @@ import {
 import { clamp, debounce, el, formatTime } from '../util'
 import {
   loadEngineScript, getEngine,
-  type EngineCallbacks, type ReaderEngine, type SelectionInfo, type TocEntry,
+  type EngineCallbacks, type ReaderEngine, type SearchHit, type SelectionInfo, type TocEntry,
 } from '../engines/types'
 import { toast, withToast } from '../components/toast'
 import { confirmDialog } from '../components/dialogs'
@@ -61,7 +61,7 @@ export class ReaderView {
   private percent = 0
   private progressLabel = ''
   private lastDetail: unknown = null
-  private activePanel: 'toc' | 'ann' | null = null
+  private activePanel: 'toc' | 'ann' | 'search' | null = null
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private selection: SelectionInfo | null = null
   private popup: HTMLElement | null = null
@@ -75,6 +75,12 @@ export class ReaderView {
    * 滑杆每 tick 直调会连续重排造成卡顿；合并为停顿 150ms 后应用一次
    */
   private applyStyleDebounced = debounce(() => this.engine?.applyStyle(this.style), 150)
+
+  /* 书内搜索状态 */
+  private searchHits: SearchHit[] = []
+  private searchIndex = -1
+  private searchSeq = 0
+  private searchTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(root: HTMLElement) {
     this.root = root
@@ -138,6 +144,49 @@ export class ReaderView {
     body.appendChild(panel)
     body.appendChild(container)
 
+    // 书内搜索栏（浮动于阅读区顶部，Ctrl+F 唤起；挂在 body 上避免开书时被清空）
+    const searchbar = el('div', 'reader-searchbar hidden')
+    searchbar.id = 'reader-searchbar'
+    const searchInput = el('input', 'searchbar-input') as HTMLInputElement
+    searchInput.id = 'searchbar-input'
+    searchInput.type = 'text'
+    searchInput.placeholder = '在本书中搜索…（Enter 下一个，Shift+Enter 上一个）'
+    searchInput.oninput = () => {
+      if (this.searchTimer) clearTimeout(this.searchTimer)
+      this.searchTimer = setTimeout(() => void this.runSearch(searchInput.value.trim()), 300)
+    }
+    searchInput.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        e.stopPropagation()
+        this.stepSearch(e.shiftKey ? -1 : 1)
+      } else if (e.key === 'Escape') {
+        e.stopPropagation()
+        this.closeSearch()
+      }
+    }
+    const searchCount = el('span', 'searchbar-count')
+    searchCount.id = 'searchbar-count'
+    const searchListBtn = el('button', 'searchbar-btn', '☰')
+    searchListBtn.title = '结果列表'
+    searchListBtn.onclick = () => this.togglePanel('search')
+    const mkStepBtn = (text: string, title: string, dir: 1 | -1) => {
+      const b = el('button', 'searchbar-btn', text)
+      b.title = title
+      b.onclick = () => this.stepSearch(dir)
+      return b
+    }
+    const searchClose = el('button', 'searchbar-btn', '×')
+    searchClose.title = '关闭搜索（Esc）'
+    searchClose.onclick = () => this.closeSearch()
+    searchbar.appendChild(searchInput)
+    searchbar.appendChild(searchCount)
+    searchbar.appendChild(mkStepBtn('↑', '上一个（Shift+Enter）', -1))
+    searchbar.appendChild(mkStepBtn('↓', '下一个（Enter）', 1))
+    searchbar.appendChild(searchListBtn)
+    searchbar.appendChild(searchClose)
+    body.appendChild(searchbar)
+
     const bottom = el('footer', 'reader-bottombar')
     const prev = el('button', 'icon-btn', '上一章')
     prev.onclick = () => void this.engine?.prevChapter()
@@ -179,6 +228,11 @@ export class ReaderView {
     this.activePanel = null
     document.getElementById('reader-panel')?.classList.add('hidden')
     document.getElementById('reader-settings')?.classList.add('hidden')
+    // 重置上一本书的搜索状态
+    this.searchSeq++
+    this.searchHits = []
+    this.searchIndex = -1
+    document.getElementById('reader-searchbar')?.classList.add('hidden')
 
     let payload
     let annotations
@@ -302,13 +356,14 @@ export class ReaderView {
 
   /* ------------------------------ 面板 ------------------------------ */
 
-  private togglePanel(kind: 'toc' | 'ann'): void {
+  private togglePanel(kind: 'toc' | 'ann' | 'search'): void {
     this.activePanel = this.activePanel === kind ? null : kind
     const panel = document.getElementById('reader-panel')
     if (!panel) return
     panel.classList.toggle('hidden', !this.activePanel)
     if (this.activePanel === 'toc') this.renderTocPanel()
     else if (this.activePanel === 'ann') this.renderAnnPanel()
+    else if (this.activePanel === 'search') this.renderSearchPanel()
   }
 
   private renderTocPanel(): void {
@@ -562,6 +617,105 @@ export class ReaderView {
     }, () => '已添加书签')
   }
 
+  /* ------------------------------ 书内搜索 ------------------------------ */
+
+  private openSearchUI(): void {
+    const bar = document.getElementById('reader-searchbar')
+    if (!bar) return
+    bar.classList.remove('hidden')
+    const input = document.getElementById('searchbar-input') as HTMLInputElement | null
+    input?.focus()
+    input?.select()
+  }
+
+  private async runSearch(q: string): Promise<void> {
+    const seq = ++this.searchSeq
+    this.searchHits = []
+    this.searchIndex = -1
+    const countEl = document.getElementById('searchbar-count')
+    if (!q) {
+      if (countEl) countEl.textContent = ''
+      this.engine?.clearSearch?.()
+      if (this.activePanel === 'search') this.renderSearchPanel()
+      return
+    }
+    if (!this.engine?.search) {
+      if (countEl) countEl.textContent = '该格式暂不支持搜索'
+      return
+    }
+    if (countEl) countEl.textContent = '搜索中…'
+    try {
+      const hits = await this.engine.search(q, (done, total) => {
+        if (seq === this.searchSeq && countEl) countEl.textContent = `搜索中 ${done}/${total}`
+      })
+      if (seq !== this.searchSeq) return
+      this.searchHits = hits
+      this.updateSearchCount()
+      if (this.activePanel === 'search') this.renderSearchPanel()
+      if (hits.length) this.gotoHit(0)
+    } catch (e) {
+      if (seq === this.searchSeq && countEl) countEl.textContent = '搜索失败'
+      window.scriptra.log('error', `书内搜索失败: ${e instanceof Error ? e.stack : String(e)}`)
+    }
+  }
+
+  private updateSearchCount(): void {
+    const countEl = document.getElementById('searchbar-count')
+    if (!countEl) return
+    const n = this.searchHits.length
+    countEl.textContent = n === 0 ? '无结果'
+      : this.searchIndex >= 0 ? `${this.searchIndex + 1} / ${n}` : `${n} 个结果`
+  }
+
+  private stepSearch(dir: 1 | -1): void {
+    if (!this.searchHits.length) return
+    const i = this.searchIndex + dir
+    this.gotoHit((i + this.searchHits.length) % this.searchHits.length)
+  }
+
+  private gotoHit(i: number): void {
+    const hit = this.searchHits[i]
+    if (!hit) return
+    this.searchIndex = i
+    this.updateSearchCount()
+    void this.engine?.goToHit?.(hit)
+    if (this.activePanel === 'search') this.renderSearchPanel()
+  }
+
+  private closeSearch(): void {
+    this.searchSeq++
+    this.searchHits = []
+    this.searchIndex = -1
+    document.getElementById('reader-searchbar')?.classList.add('hidden')
+    this.engine?.clearSearch?.()
+    if (this.activePanel === 'search') this.togglePanel('search')
+  }
+
+  private renderSearchPanel(): void {
+    const panel = document.getElementById('reader-panel')
+    if (!panel) return
+    panel.innerHTML = ''
+    panel.appendChild(el('div', 'panel-title', `搜索结果（${this.searchHits.length}）`))
+    const list = el('div', 'panel-list')
+    if (!this.searchHits.length) {
+      list.appendChild(el('div', 'filter-empty', '暂无结果，试试其他关键词'))
+    }
+    const cap = 300
+    this.searchHits.slice(0, cap).forEach((hit, i) => {
+      const row = el('button', `ann-item search-hit${i === this.searchIndex ? ' active' : ''}`)
+      const head = el('div', 'ann-head')
+      head.appendChild(el('span', 'ann-time', hit.label))
+      row.appendChild(head)
+      if (hit.excerpt) row.appendChild(el('div', 'ann-text', hit.excerpt))
+      row.onclick = () => this.gotoHit(i)
+      list.appendChild(row)
+    })
+    if (this.searchHits.length > cap) {
+      list.appendChild(el('div', 'filter-empty', `共 ${this.searchHits.length} 条，仅显示前 ${cap} 条`))
+    }
+    panel.appendChild(list)
+  }
+
   /* ------------------------------ 选区弹窗 ------------------------------ */
 
   private showSelectionPopup(sel: SelectionInfo): void {
@@ -762,6 +916,8 @@ export class ReaderView {
 
     if (e.key === 'Escape') {
       if (document.getElementById('ann-popup')) { this.closePopup(); return }
+      const searchbar = document.getElementById('reader-searchbar')
+      if (searchbar && !searchbar.classList.contains('hidden')) { this.closeSearch(); return }
       if (this.activePanel) { this.togglePanel(this.activePanel); return }
       const drawer = document.getElementById('reader-settings')
       if (drawer && !drawer.classList.contains('hidden')) { drawer.classList.add('hidden'); return }
@@ -769,6 +925,11 @@ export class ReaderView {
       return
     }
 
+    if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault()
+      this.openSearchUI()
+      return
+    }
     if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
       e.preventDefault()
       void this.addBookmark()

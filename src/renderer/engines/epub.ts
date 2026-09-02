@@ -8,7 +8,7 @@
  */
 
 import type { TocItem } from '../../shared/types'
-import { DocEngine } from './common'
+import { DocEngine, buildTextCache, type TextCache } from './common'
 import { abToDataUrl, resolveZipPath } from '../util'
 import { registerEngine, type TocEntry } from './types'
 
@@ -57,6 +57,16 @@ class EpubEngine extends DocEngine {
     this.tocItems = payload.manifest?.toc ?? []
     if (!this.spine.length) throw new Error('EPUB 解析结果为空')
     await super.open(container, payload, style, cb)
+  }
+
+  /** 搜索用轻量解析：仅取文本，跳过图片/CSS 重写，全书扫描快一个量级 */
+  protected async chapterSearchCache(index: number): Promise<TextCache | null> {
+    const href = this.spine[index]?.href
+    if (!href) return null
+    const raw = await this.fetchText(href)
+    if (!raw) return null
+    const doc = new DOMParser().parseFromString(raw, 'text/html')
+    return doc.body ? buildTextCache(doc.body) : null
   }
 
   protected async loadChapterHtml(index: number): Promise<string> {

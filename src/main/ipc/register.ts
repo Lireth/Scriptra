@@ -16,7 +16,7 @@ import {
   getBook, indexBookText, lastReadBook, libraryStats, listBooks, setBookProgress, updateBook,
 } from '../db/books'
 import {
-  buildOpenPayload, closeSessionFor, coverDataUrl, deleteBooks, getEpubResource, importFiles, scanFolder,
+  buildOpenPayload, closeSessionFor, deleteBooks, getEpubResource, importFiles, requestCancelImport, scanFolder,
 } from '../services/library'
 import { getSettings, recordScanFolder, setSettings } from '../services/settings'
 import {
@@ -90,6 +90,11 @@ export function registerIpcHandlers(): void {
     return r
   })
 
+  handle(IPC.LibraryCancelImport, () => {
+    requestCancelImport()
+    return true
+  })
+
   handle(IPC.LibraryList, (_e, query: BookQuery) => listBooks(sanitizeQuery(query)))
 
   handle(IPC.LibraryGet, (_e, id: string) => getBook(str(id, 64)))
@@ -103,8 +108,6 @@ export function registerIpcHandlers(): void {
   })
 
   handle(IPC.LibraryStats, () => libraryStats())
-
-  handle(IPC.LibraryCover, (_e, id: string) => coverDataUrl(str(id, 64)) ?? '')
 
   handle(IPC.LibraryContinue, () => lastReadBook())
 

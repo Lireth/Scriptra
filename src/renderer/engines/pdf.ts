@@ -10,8 +10,11 @@ import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import type { Annotation, ReaderStyle } from '../../shared/types'
 import { clamp } from '../util'
-import { READER_THEMES } from './common'
-import { registerEngine, type EngineCallbacks, type EnginePayload, type ReaderEngine, type TocEntry } from './types'
+import {
+  buildTextCache, cacheText, findOccurrences, makeExcerpt, MAX_SEARCH_MARKS,
+  READER_THEMES, unwrapMarks, wrapRangeWithClass,
+} from './common'
+import { registerEngine, type EngineCallbacks, type EnginePayload, type ReaderEngine, type SearchHit, type TocEntry } from './types'
 
 interface PageSlot {
   el: HTMLElement
@@ -443,6 +446,89 @@ class PdfEngine implements ReaderEngine {
 
   clearSelection(): void {
     try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
+  }
+
+  /* ------------------------------ 书内搜索 ------------------------------ */
+
+  private searchSeq = 0
+  private searchQuery = ''
+
+  async search(query: string, onProgress?: (done: number, total: number) => void): Promise<SearchHit[]> {
+    const seq = ++this.searchSeq
+    this.searchQuery = query
+    this.clearSearchMarks()
+    const hits: SearchHit[] = []
+    const needle = query.toLowerCase()
+    if (!this.doc || !needle) return hits
+    const n = this.doc.numPages
+    for (let p = 1; p <= n; p++) {
+      if (this.destroyed || seq !== this.searchSeq) return hits
+      try {
+        const page = await this.doc.getPage(p)
+        if (this.destroyed || seq !== this.searchSeq) { page.cleanup(); return hits }
+        const tc = await page.getTextContent()
+        const text = tc.items.map((it) => ('str' in it ? (it as { str: string }).str : '')).join('')
+        for (const [m, occ] of findOccurrences(text, needle).entries()) {
+          hits.push({
+            chapter: p - 1, matchIndex: m,
+            label: `第 ${p} / ${n} 页`,
+            excerpt: makeExcerpt(text, occ.start, occ.end),
+          })
+        }
+        page.cleanup()
+      } catch { /* 单页提取失败跳过 */ }
+      onProgress?.(p, n)
+      // 让出主线程，保持搜索期间滚动与输入响应
+      if (p % 5 === 0) await new Promise((r) => setTimeout(r, 0))
+    }
+    return hits
+  }
+
+  async goToHit(hit: SearchHit): Promise<void> {
+    await this.goPage(hit.chapter + 1)
+    await this.highlightSearchHits(hit.chapter + 1, hit.matchIndex)
+  }
+
+  clearSearch(): void {
+    this.searchSeq++
+    this.searchQuery = ''
+    this.clearSearchMarks()
+  }
+
+  private clearSearchMarks(): void {
+    if (!this.scroller) return
+    unwrapMarks(this.scroller, 'mark.scriptra-search')
+    // 恢复文本层默认透明度（搜索期间临时提升以便看清标记）
+    this.scroller.querySelectorAll('.textLayer.has-search-marks')
+      .forEach((l) => l.classList.remove('has-search-marks'))
+  }
+
+  /** 等待目标页文本层渲染完成后套上搜索标记并滚动定位 */
+  private async highlightSearchHits(page: number, focusIndex: number): Promise<void> {
+    const deadline = Date.now() + 3000
+    let layer: HTMLElement | null = null
+    while (Date.now() < deadline) {
+      if (this.destroyed) return
+      layer = this.scroller.querySelector(`.pdf-page[data-page="${page}"] .textLayer`) as HTMLElement | null
+      if (layer?.querySelector('span')) break
+      layer = null
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    if (!layer || this.destroyed || !this.searchQuery) return
+    this.clearSearchMarks()
+    layer.classList.add('has-search-marks')
+    let cache = buildTextCache(layer)
+    const occs = findOccurrences(cacheText(cache), this.searchQuery.toLowerCase(), MAX_SEARCH_MARKS)
+    const focusAt = Math.min(focusIndex, occs.length - 1)
+    let focusMark: HTMLElement | null = null
+    for (const [i, occ] of occs.entries()) {
+      const mark = wrapRangeWithClass(document, cache, occ.start, occ.end,
+        i === focusAt ? 'scriptra-search current' : 'scriptra-search')
+      // splitText 改变文本节点，逐个重建保证后续偏移有效
+      cache = buildTextCache(layer)
+      if (i === focusAt) focusMark = mark
+    }
+    focusMark?.scrollIntoView({ block: 'center' })
   }
 
   focusAnnotation(annId: string): boolean {
