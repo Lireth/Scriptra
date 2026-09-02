@@ -618,6 +618,10 @@ select.form-input { padding: 6px 8px; }
 }
 .searchbar-btn:hover { background: var(--accent-soft); color: var(--accent); }
 .searchbar-btn:disabled { opacity: .4; cursor: default; }
+/* 左侧面板展开时搜索栏右移半个面板宽，避免遮挡（面板宽 280px） */
+.reader-body:has(#reader-panel:not(.hidden)) .reader-searchbar {
+  left: calc(50% + 140px);
+}
 
 /* 搜索标记（主文档 / iframe 内经 readerStyleCss 注入同名规则） */
 mark.scriptra-search { background: rgba(255, 193, 7, 0.4); color: inherit; border-radius: 2px; }

@@ -318,6 +318,15 @@ class PdfEngine implements ReaderEngine {
           `[perf] PDF 首页渲染: ${Math.round(performance.now() - this.openedAt)}ms`)
       }
       this.drawOverlays(slot)
+      // 搜索激活时，页面（重）渲染完成后自动重套该页搜索标记（B15：
+      // textLayer 随页面重渲染重建，先前套上的标记会随之丢失）
+      if (this.searchQuery) {
+        const layer = slot.canvasBox.querySelector('.textLayer') as HTMLElement | null
+        if (layer) {
+          layer.classList.add('has-search-marks')
+          this.applySearchMarks(layer)
+        }
+      }
     } catch (e) {
       if ((e as { name?: string })?.name !== 'RenderingCancelledException') {
         window.scriptra.log('warn', `PDF 页面渲染失败: ${e}`)
@@ -503,23 +512,28 @@ class PdfEngine implements ReaderEngine {
       .forEach((l) => l.classList.remove('has-search-marks'))
   }
 
-  /** 等待目标页文本层渲染完成后套上搜索标记并滚动定位 */
-  private async highlightSearchHits(page: number, focusIndex: number): Promise<void> {
-    const deadline = Date.now() + 3000
-    let layer: HTMLElement | null = null
+  /** 等待目标页文本层渲染完成 */
+  private async waitForTextLayer(page: number, timeoutMs = 3000): Promise<HTMLElement | null> {
+    const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      if (this.destroyed) return
-      layer = this.scroller.querySelector(`.pdf-page[data-page="${page}"] .textLayer`) as HTMLElement | null
-      if (layer?.querySelector('span')) break
-      layer = null
+      if (this.destroyed) return null
+      const layer = this.scroller.querySelector(`.pdf-page[data-page="${page}"] .textLayer`) as HTMLElement | null
+      if (layer?.querySelector('span')) return layer
       await new Promise((r) => setTimeout(r, 100))
     }
-    if (!layer || this.destroyed || !this.searchQuery) return
-    this.clearSearchMarks()
-    layer.classList.add('has-search-marks')
+    return null
+  }
+
+  /**
+   * 在指定文本层上套搜索标记，返回聚焦标记（供滚动定位）。
+   * focusIndex < 0 时不高亮 current（用于页面重渲染后的自动补套）。
+   */
+  private applySearchMarks(layer: HTMLElement, focusIndex = -1): HTMLElement | null {
+    if (!this.searchQuery) return null
     let cache = buildTextCache(layer)
     const occs = findOccurrences(cacheText(cache), this.searchQuery.toLowerCase(), MAX_SEARCH_MARKS)
-    const focusAt = Math.min(focusIndex, occs.length - 1)
+    if (!occs.length) return null
+    const focusAt = focusIndex >= 0 ? Math.min(focusIndex, occs.length - 1) : -1
     let focusMark: HTMLElement | null = null
     for (const [i, occ] of occs.entries()) {
       const mark = wrapRangeWithClass(document, cache, occ.start, occ.end,
@@ -528,6 +542,15 @@ class PdfEngine implements ReaderEngine {
       cache = buildTextCache(layer)
       if (i === focusAt) focusMark = mark
     }
+    return focusMark
+  }
+
+  private async highlightSearchHits(page: number, focusIndex: number): Promise<void> {
+    const layer = await this.waitForTextLayer(page)
+    if (!layer || this.destroyed || !this.searchQuery) return
+    this.clearSearchMarks()
+    layer.classList.add('has-search-marks')
+    const focusMark = this.applySearchMarks(layer, focusIndex)
     focusMark?.scrollIntoView({ block: 'center' })
   }
 
