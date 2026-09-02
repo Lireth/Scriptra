@@ -432,10 +432,15 @@ export class LibraryView {
     const off = window.scriptra.onImportProgress((p) => {
       if (!bar) return
       bar.classList.remove('hidden')
+      const name = p.path.split(/[\\/]/).pop() ?? p.path
+      if (p.stage === 'pdf-text') {
+        bar.textContent = `正在提取全文（${p.current} / ${p.total} 页）：${name}`
+        return
+      }
       const total = p.total || totalHint
       bar.textContent = total
-        ? `正在导入 ${p.current} / ${total}：${p.path.split(/[\\/]/).pop()}`
-        : `正在导入：${p.path.split(/[\\/]/).pop()}`
+        ? `正在导入 ${p.current} / ${total}：${name}`
+        : `正在导入：${name}`
     })
     try {
       const r = await fn()

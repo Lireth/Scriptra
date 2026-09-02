@@ -95,7 +95,10 @@ async function importOne(
     contentText = r.contentText
     contentIndexed = !!contentText
   } else if (format === 'pdf') {
-    const r = await parsePdfFile(filePath)
+    const r = await parsePdfFile(filePath, (page, numPages) => {
+      // 全书文本提取可能耗时较长，逐页回报进度
+      sendProgress(sender, { current: page, total: numPages, path: filePath, stage: 'pdf-text' })
+    })
     ;({ title, author } = r.meta)
     contentText = r.contentText
     contentIndexed = !!contentText

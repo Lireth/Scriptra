@@ -144,7 +144,8 @@ export interface ImportProgressEvent {
   current: number
   total: number
   path: string
-  stage: 'scan' | 'import'
+  /** scan：扫描文件；import：导入文件；pdf-text：PDF 全文逐页提取（current/total 为页码） */
+  stage: 'scan' | 'import' | 'pdf-text'
 }
 
 /* ------------------------------ IPC 通道名 ------------------------------ */

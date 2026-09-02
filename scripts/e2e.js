@@ -140,8 +140,8 @@ function makeTxt(dir) {
   return p
 }
 
-function makePdf(dir) {
-  // 程序化构建带正确 xref 的最小 PDF
+function makePdf(dir, pages = 180) {
+  // 程序化构建带正确 xref 的多页 PDF（验证全书文本索引，无页数上限）
   const chunks = []
   const offsets = [0]
   const push = (s) => {
@@ -150,19 +150,31 @@ function makePdf(dir) {
     chunks.push(buf)
   }
   push('%PDF-1.4\n')
+  // 对象布局：1=Catalog 2=Pages 3..=每页两个对象（Page + Contents），最后一个为 Font
+  const pageIds = []
+  const contentIds = []
+  for (let i = 1; i <= pages; i++) {
+    pageIds.push(3 + (i - 1) * 2)
+    contentIds.push(4 + (i - 1) * 2)
+  }
+  const fontId = 3 + pages * 2
   push('1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n')
-  push('2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj\n')
-  push('3 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>> endobj\n')
-  const stream = 'BT /F1 24 Tf 100 700 Td (Hello Scriptra PDF) Tj ET'
-  push(`4 0 obj <</Length ${stream.length}>> stream\n${stream}\nendstream endobj\n`)
-  push('5 0 obj <</Type /Font /Subtype /Type1 /BaseFont /Helvetica>> endobj\n')
+  const kids = pageIds.map((id) => `${id} 0 R`).join(' ')
+  push(`2 0 obj <</Type /Pages /Kids [${kids}] /Count ${pages}>> endobj\n`)
+  for (let i = 1; i <= pages; i++) {
+    push(`${pageIds[i - 1]} 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentIds[i - 1]} 0 R /Resources <</Font <</F1 ${fontId} 0 R>>>>>> endobj\n`)
+    const stream = `BT /F1 12 Tf 72 720 Td (scriptra e2e page ${i} marker xyzq${i}) Tj ET`
+    push(`${contentIds[i - 1]} 0 obj <</Length ${stream.length}>> stream\n${stream}\nendstream endobj\n`)
+  }
+  push(`${fontId} 0 obj <</Type /Font /Subtype /Type1 /BaseFont /Helvetica>> endobj\n`)
+  const size = fontId + 1
   const xrefOff = offsets[offsets.length - 1]
-  let xref = 'xref\n0 6\n0000000000 65535 f \n'
-  for (let i = 1; i <= 5; i++) {
+  let xref = `xref\n0 ${size}\n0000000000 65535 f \n`
+  for (let i = 1; i < size; i++) {
     xref += String(offsets[i]).padStart(10, '0') + ' 00000 n \n'
   }
   push(xref)
-  push(`trailer <</Size 6 /Root 1 0 R>>\nstartxref\n${xrefOff}\n%%EOF\n`)
+  push(`trailer <</Size ${size} /Root 1 0 R>>\nstartxref\n${xrefOff}\n%%EOF\n`)
   const p = path.join(dir, 'e2e.pdf')
   fs.writeFileSync(p, Buffer.concat(chunks))
   return p
@@ -219,6 +231,15 @@ async function main() {
     const hitTitle = await evaluate(client,
       `window.scriptra.listBooks({ q: '山海' })`)
     check('书名搜索命中 EPUB', hitTitle.some((b) => b.id === epubBook.id))
+
+    // PDF 全书索引：标记词只出现在第 180 页（超过旧的 150 页上限）
+    const hitPdfLastPage = await evaluate(client,
+      `window.scriptra.listBooks({ q: 'xyzq180' })`)
+    check('PDF 第 180 页文本可搜索（无页数上限）', hitPdfLastPage.some((b) => b.id === pdfBook.id),
+      JSON.stringify(hitPdfLastPage.map((b) => b.title)))
+    const hitPdfMidPage = await evaluate(client,
+      `window.scriptra.listBooks({ q: 'xyzq42' })`)
+    check('PDF 第 42 页文本可搜索', hitPdfMidPage.some((b) => b.id === pdfBook.id))
     const stats = await evaluate(client, 'window.scriptra.stats()')
     check('统计信息', stats.total === 4)
 
@@ -319,7 +340,7 @@ async function main() {
       root.remove()
       return { hasCanvas: !!canvas && canvas.width > 0, pages, hasProgress: !!progress }
     })()`)
-    check('PDF 引擎渲染（pdf.js + worker）', pdfResult.hasCanvas === true && pdfResult.pages === 1,
+    check('PDF 引擎渲染（pdf.js + worker，180 页）', pdfResult.hasCanvas === true && pdfResult.pages === 180,
       JSON.stringify(pdfResult))
     check('PDF 进度回调', pdfResult.hasProgress === true)
 
