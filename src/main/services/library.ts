@@ -55,8 +55,26 @@ export function requestCancelImport(): void { importCancelled = true }
 /** 导入防重入锁：并发导入会让同一文件绕过 hash 去重检查、重复入库 */
 let importing = false
 
-/** 文件指纹：大小 + 首部 64KB 哈希，用于去重 */
-function fileHash(filePath: string, size: number): string {
+/** 文件指纹：整文件 SHA-256（1MB 分块流式），杜绝"同头异尾"误判重复 */
+function fileHash(filePath: string): string {
+  const hash = crypto.createHash('sha256')
+  const fd = fs.openSync(filePath, 'r')
+  try {
+    const buf = Buffer.alloc(1024 * 1024)
+    for (let read = 0; (read = fs.readSync(fd, buf, 0, buf.length, null)) > 0;) {
+      hash.update(buf.subarray(0, read))
+    }
+  } finally {
+    fs.closeSync(fd)
+  }
+  return hash.digest('hex')
+}
+
+/**
+ * 旧版指纹（大小 + 首 64KB SHA-1）：仅用于识别升级前入库的文件，
+ * 避免升级后同一文件因指纹算法变更而被重复导入。新入库一律使用 SHA-256。
+ */
+function legacyFileHash(filePath: string, size: number): string {
   const fd = fs.openSync(filePath, 'r')
   try {
     const head = Buffer.alloc(Math.min(65536, size))
@@ -78,8 +96,9 @@ async function importOne(
   if (!format) throw new Error('不支持的文件格式')
 
   const stat = await fsp.stat(filePath)
-  const hash = fileHash(filePath, stat.size)
-  if (findByHash(hash)) return 'skipped'
+  const hash = fileHash(filePath)
+  // 新指纹未命中时回查旧指纹，兼容升级前入库的文件
+  if (findByHash(hash) || findByHash(legacyFileHash(filePath, stat.size))) return 'skipped'
 
   sendProgress(sender, { current: index, total, path: filePath, stage: 'import' })
 

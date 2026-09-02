@@ -14,6 +14,17 @@ import { registerEngine, type TocEntry } from './types'
 
 const MAX_ASSET_BYTES = 4 * 1024 * 1024
 
+/** 超大资源占位图：替代静默置空导致的破图 */
+function oversizePlaceholder(): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">`
+    + `<rect width="320" height="180" fill="#ece7dc"/>`
+    + `<rect x="1" y="1" width="318" height="178" fill="none" stroke="#c9bfae" stroke-dasharray="4 3"/>`
+    + `<text x="160" y="86" font-family="'微软雅黑',sans-serif" font-size="13" fill="#8d8474" text-anchor="middle">资源过大（超过 4MB）未加载</text>`
+    + `<text x="160" y="108" font-family="'微软雅黑',sans-serif" font-size="11" fill="#a89e8c" text-anchor="middle">不影响正文阅读</text>`
+    + `</svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
 class EpubEngine extends DocEngine {
   private spine: { href: string; title: string }[] = []
   private tocItems: TocItem[] = []
@@ -140,12 +151,12 @@ class EpubEngine extends DocEngine {
     return rewritten
   }
 
-  /** 资源 -> data URL（带缓存与大小限制） */
+  /** 资源 -> data URL（带缓存与大小限制；超大资源返回占位图而非破图） */
   async asset(path: string): Promise<string | null> {
     if (this.assetCache.has(path)) return this.assetCache.get(path)!
     try {
       const res = await window.scriptra.getResource(this.payload.id, path)
-      if (res.bytes.byteLength > MAX_ASSET_BYTES) return null
+      if (res.bytes.byteLength > MAX_ASSET_BYTES) return oversizePlaceholder()
       const url = abToDataUrl(res.mime, res.bytes)
       this.assetCache.set(path, url)
       return url
