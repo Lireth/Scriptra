@@ -8,7 +8,7 @@
 import type { Annotation, ReaderStyle } from '../../shared/types'
 import { escapeHtml } from '../util'
 import {
-  buildTextCache, pointFromOffset, READER_THEMES, wrapRangeWithMark, type TextCache,
+  buildTextCache, READER_THEMES, wrapRangeWithMark, type TextCache,
 } from './common'
 import { registerEngine, type EngineCallbacks, type EnginePayload, type ReaderEngine, type TocEntry } from './types'
 
@@ -194,17 +194,10 @@ class TxtEngine implements ReaderEngine {
     for (const ann of list) {
       if (ann.locator.kind !== 'text') continue
       if (ann.locator.chapter !== this.current) continue
-      const loc = ann.locator
-      if (loc.start >= loc.end) continue
-      const a = pointFromOffset(this.cache, loc.start)
-      const b = pointFromOffset(this.cache, loc.end - 1)
-      if (!a.node || !b.node) continue
-      const range = doc.createRange()
-      try {
-        range.setStart(a.node, a.offset)
-        range.setEnd(b.node, b.offset + 1)
-      } catch { continue }
+      if (ann.locator.start >= ann.locator.end) continue
       wrapRangeWithMark(doc, this.cache, ann)
+      // splitText 会使 cache 失效，逐个重建保证后续高亮定位准确
+      this.cache = buildTextCache(this.scroller.querySelector('.txt-content')!)
     }
   }
 

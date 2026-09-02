@@ -236,6 +236,7 @@ export abstract class DocEngine implements ReaderEngine {
   protected cache: TextCache = { nodes: [], starts: [], total: 0 }
   protected current = -1
   protected destroyed = false
+  private renderSeq = 0
   private scrollReport: (() => void) | null = null
 
   protected abstract get chapterCount(): number
@@ -286,8 +287,10 @@ export abstract class DocEngine implements ReaderEngine {
   /** 渲染章节并等待 iframe 加载完成 */
   protected async showChapter(index: number, restoreRatio = 0, anchor = ''): Promise<void> {
     if (this.destroyed) return
+    // 并发保护：快速翻章时只应用最后一次请求，丢弃被覆盖的过期渲染
+    const seq = ++this.renderSeq
     const html = await this.loadChapterHtml(index)
-    if (this.destroyed) return
+    if (this.destroyed || seq !== this.renderSeq) return
     this.current = index
 
     await new Promise<void>((resolve) => {
@@ -299,6 +302,7 @@ export abstract class DocEngine implements ReaderEngine {
       frame.addEventListener('load', onLoad)
       frame.srcdoc = html
     })
+    if (this.destroyed || seq !== this.renderSeq) return
 
     this.idoc = this.iframe.contentDocument ?? this.iframe.contentWindow!.document
     this.iwin = this.iframe.contentWindow!
@@ -494,6 +498,9 @@ export abstract class DocEngine implements ReaderEngine {
       if (ann.locator.kind !== 'text') continue
       if (ann.locator.chapter !== this.current) continue
       wrapRangeWithMark(this.idoc, this.cache, ann)
+      // wrapRangeWithMark 内部 splitText 会改变文本节点，使 cache 失效；
+      // 每应用一个高亮即重建，保证后续高亮基于最新偏移定位
+      this.rebuildTextCache()
     }
   }
 

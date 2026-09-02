@@ -168,16 +168,17 @@ export function listBooks(query: BookQuery): Book[] {
     }
   }
 
-  const orderBy = {
+  const sortMap: Record<string, string> = {
     recent: 'CASE WHEN b.last_read_at > 0 THEN b.last_read_at ELSE b.updated_at END DESC',
     added: 'b.added_at DESC',
     title: `b.title COLLATE NOCASE`,
     author: `b.author COLLATE NOCASE`,
     rating: 'b.rating DESC, b.updated_at DESC',
-  }[query.sort ?? 'added']
+  }
+  const orderBy = sortMap[query.sort ?? 'added'] ?? sortMap.added
 
-  const limit = Math.min(query.limit ?? 120, 500)
-  const offset = query.offset ?? 0
+  const limit = clampInt(query.limit, 120, 1, 500)
+  const offset = clampInt(query.offset, 0, 0, Number.MAX_SAFE_INTEGER)
 
   const sql = `
     SELECT b.* FROM books b ${joins}
@@ -235,7 +236,19 @@ export function setBookProgress(id: string, progress: number, detail: ProgressDe
   d.prepare(`
     UPDATE books SET progress = ?, progress_detail = ?, status = ?, last_read_at = ?, updated_at = ?
     WHERE id = ?
-  `).run(Math.max(0, Math.min(1, progress)), JSON.stringify(detail ?? ''), status, Date.now(), Date.now(), id)
+  `).run(
+    Math.max(0, Math.min(1, progress)),
+    // detail 为 null/undefined 时存空串；否则存 JSON（避免 JSON.stringify('') 写入 '""'）
+    detail ? JSON.stringify(detail) : '',
+    status, Date.now(), Date.now(), id,
+  )
+}
+
+/** 将任意值安全转为整数并夹到 [min,max]，非法/缺省回落到 def */
+function clampInt(v: unknown, def: number, min: number, max: number): number {
+  const n = Math.trunc(Number(v))
+  if (!Number.isFinite(n)) return def
+  return Math.max(min, Math.min(max, n))
 }
 
 /** 延迟建立正文索引（MOBI HUFF/CDIC 等主进程无法解压时，由渲染进程回传文本） */
@@ -271,13 +284,24 @@ export function removeBooks(ids: string[]): { storedPaths: string[]; coverPaths:
   const d = getDb()
   const storedPaths: string[] = []
   const coverPaths: string[] = []
-  for (const id of ids) {
-    const paths = getBookPaths(id)
-    if (paths?.storedPath) storedPaths.push(paths.storedPath)
-    if (paths?.coverPath) coverPaths.push(paths.coverPath)
-    d.prepare('DELETE FROM books WHERE id = ?').run(id)
-    d.prepare('DELETE FROM books_fts WHERE book_id = ?').run(id)
-    d.prepare('DELETE FROM annotations WHERE book_id = ?').run(id)
+  const getPaths = d.prepare('SELECT stored_path, cover_path FROM books WHERE id = ?')
+  const delBook = d.prepare('DELETE FROM books WHERE id = ?')
+  const delFts = d.prepare('DELETE FROM books_fts WHERE book_id = ?')
+  // annotations 依赖外键级联删除
+  // 整体包裹事务：任一删除失败即回滚，避免 books 已删而 FTS/注释残留的孤儿数据
+  d.exec('BEGIN')
+  try {
+    for (const id of ids) {
+      const row = getPaths.get(id) as { stored_path: string; cover_path: string } | undefined
+      if (row?.stored_path) storedPaths.push(row.stored_path)
+      if (row?.cover_path) coverPaths.push(row.cover_path)
+      delFts.run(id)
+      delBook.run(id)
+    }
+    d.exec('COMMIT')
+  } catch (e) {
+    d.exec('ROLLBACK')
+    throw e
   }
   return { storedPaths, coverPaths }
 }

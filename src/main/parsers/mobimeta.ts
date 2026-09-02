@@ -316,15 +316,18 @@ function parseExth(data: Uint8Array | null): ExthData | null {
     const len = buf.readUInt32BE(pos + 4)
     if (len < 8 || pos + len > buf.length) break
     const value = buf.subarray(pos + 8, pos + len)
+    // 数值型 EXTH（boundary/cover/thumbnail offset）需至少 4 字节，
+    // 畸形或被截断的 MOBI 会给出更短的 value，越界读会抛 RangeError
+    const u32 = (b: Buffer): number | undefined => (b.length >= 4 ? b.readUInt32BE(0) : undefined)
     switch (type) {
       case 100: out.creator = out.creator ? out.creator + ', ' + str(value) : str(value); break
       case 101: out.publisher = str(value); break
       case 103: out.description = str(value); break
       case 104: break
       case 106: out.date = str(value); break
-      case 113: out.boundary = value.readUInt32BE(0); break
-      case 201: out.coverOffset = value.readUInt32BE(0); break
-      case 202: out.thumbnailOffset = value.readUInt32BE(0); break
+      case 113: out.boundary = u32(value); break
+      case 201: out.coverOffset = u32(value); break
+      case 202: out.thumbnailOffset = u32(value); break
       case 503: out.title = str(value); break
       case 524: out.language = str(value); break
       default: break

@@ -32,9 +32,15 @@ const ENTITIES: Record<string, string> = {
 
 export function decodeEntities(s: string): string {
   if (!s) return ''
+  const cp = (n: number): string => {
+    // 码点越界（>0x10FFFF）会让 String.fromCodePoint 抛 RangeError，
+    // 畸形 EPUB 元数据不应导致整本导入失败，非法码点原样保留
+    if (!Number.isFinite(n) || n <= 0 || n > 0x10FFFF) return ''
+    return String.fromCodePoint(n)
+  }
   return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => cp(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => cp(parseInt(d, 10)))
     .replace(/&([a-zA-Z]+);/g, (m, name) => ENTITIES[name] ?? m)
 }
 

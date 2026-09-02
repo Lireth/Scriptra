@@ -19,6 +19,7 @@ interface PageSlot {
   page: number
   rendered: boolean
   renderTask?: { cancel(): void; promise: Promise<unknown> }
+  renderToken?: number
   overlay: HTMLDivElement
   width: number
   height: number
@@ -63,6 +64,7 @@ class PdfEngine implements ReaderEngine {
   private clickHandler: ((e: MouseEvent) => void) | null = null
   private resizeTimer: ReturnType<typeof setTimeout> | null = null
   private lastLayoutWidth = 0
+  private renderQueued = false
 
   async open(
     container: HTMLElement,
@@ -116,7 +118,7 @@ class PdfEngine implements ReaderEngine {
       })
     }
 
-    this.onScrollHandler = () => this.renderVisible()
+    this.onScrollHandler = () => this.scheduleRenderVisible()
     this.scroller.addEventListener('scroll', this.onScrollHandler, { passive: true })
 
     this.mouseUpHandler = () => this.emitSelection()
@@ -191,6 +193,16 @@ class PdfEngine implements ReaderEngine {
     this.reportProgress()
   }
 
+  /** 滚动事件用 rAF 合帧，避免每帧同步读全部页的布局属性造成抖动 */
+  private scheduleRenderVisible(): void {
+    if (this.renderQueued || this.destroyed) return
+    this.renderQueued = true
+    requestAnimationFrame(() => {
+      this.renderQueued = false
+      if (!this.destroyed) this.renderVisible()
+    })
+  }
+
   /** 渲染可视页与相邻页 */
   private renderVisible(): void {
     if (this.destroyed || !this.doc) return
@@ -234,11 +246,14 @@ class PdfEngine implements ReaderEngine {
     if (this.destroyed || !this.doc) return
     slot.renderTask?.cancel()
     slot.width = width
+    // slot 级渲染令牌：并发（如 resize 与初次渲染重叠）时只应用最后一次
+    const token = (slot.renderToken = (slot.renderToken ?? 0) + 1)
 
     let page: PDFPageProxy
     try {
       page = await this.doc.getPage(slot.page)
     } catch { return }
+    if (this.destroyed || slot.renderToken !== token) { page.cleanup(); return }
 
     const base = page.getViewport({ scale: 1 })
     const scale = width / base.width
@@ -270,6 +285,7 @@ class PdfEngine implements ReaderEngine {
       })
       slot.renderTask = task
       await task.promise
+      if (this.destroyed || slot.renderToken !== token) return
 
       // 文本层（选择 / 复制）：使用 CSS 尺寸视口，避免 dpr 放大导致文本层超出页面产生横向滚动
       const textEl = document.createElement('div')
@@ -277,6 +293,7 @@ class PdfEngine implements ReaderEngine {
       textEl.style.setProperty('--scale-factor', String(scale))
       slot.canvasBox.appendChild(textEl)
       const tc = await page.streamTextContent()
+      if (this.destroyed || slot.renderToken !== token) { textEl.remove(); return }
       const tlTask = pdfjsAny.renderTextLayer({
         textContentSource: tc,
         container: textEl,
@@ -284,6 +301,7 @@ class PdfEngine implements ReaderEngine {
       })
       slot.renderTask = tlTask
       await tlTask.promise
+      if (this.destroyed || slot.renderToken !== token) return
 
       slot.rendered = true
       this.drawOverlays(slot)

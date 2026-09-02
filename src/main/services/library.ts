@@ -340,19 +340,35 @@ export async function getEpubResource(
     }
   }
   if (!s.zip) return null
-  const entry = s.zip.file(resPath) ?? s.zip.file(decodeURIComponent(resPath))
+  const entry = s.zip.file(resPath) ?? s.zip.file(safeDecodePath(resPath))
   if (!entry) return null
+  // ZIP 炸弹防护：单条目解压后体积超限直接拒绝，避免主进程 OOM
+  const uncompressed = (entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize
+  if (typeof uncompressed === 'number' && uncompressed > MAX_EPUB_RESOURCE_BYTES) {
+    log.warn(`EPUB 资源过大已拒绝: ${resPath} (${uncompressed} bytes)`)
+    return null
+  }
   const name = resPath.toLowerCase()
   const mime = name.endsWith('.png') ? 'image/png'
     : name.endsWith('.gif') ? 'image/gif'
     : name.endsWith('.webp') ? 'image/webp'
     : name.endsWith('.svg') ? 'image/svg+xml'
     : name.endsWith('.css') ? 'text/css'
-    : name.endsWith('.otf') || name.endsWith('.ttf') || name.endsWith('.woff') ? 'font/woff'
+    : name.endsWith('.otf') ? 'font/otf'
+    : name.endsWith('.ttf') ? 'font/ttf'
+    : name.endsWith('.woff2') ? 'font/woff2'
+    : name.endsWith('.woff') ? 'font/woff'
     : name.endsWith('.xhtml') || name.endsWith('.html') || name.endsWith('.htm') ? 'text/html'
     : 'image/jpeg'
   const bytes = await entry.async('arraybuffer')
   return { mime, bytes }
+}
+
+/** 单条目解压上限 32MB */
+const MAX_EPUB_RESOURCE_BYTES = 32 * 1024 * 1024
+
+function safeDecodePath(p: string): string {
+  try { return decodeURIComponent(p) } catch { return p }
 }
 
 export function getFileBuffer(bookId: string): ArrayBuffer | null {

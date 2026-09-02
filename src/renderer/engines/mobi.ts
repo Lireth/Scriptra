@@ -20,6 +20,14 @@ interface FoliateSection {
   createDocument(): Promise<Document>
 }
 
+/** zlib inflate：用浏览器原生 DecompressionStream 解压 MOBI 内嵌压缩字体 */
+async function unzlibBytes(data: Uint8Array): Promise<Uint8Array> {
+  const ds = new DecompressionStream('deflate')
+  const stream = new Blob([data as unknown as BlobPart]).stream().pipeThrough(ds)
+  const buf = await new Response(stream).arrayBuffer()
+  return new Uint8Array(buf)
+}
+
 interface FoliateBook {
   sections: FoliateSection[]
   toc?: { label?: string; href?: string; subitems?: unknown[] }[]
@@ -42,6 +50,7 @@ class MobiEngine implements ReaderEngine {
   private tocList: TocEntry[] = []
   private current = -1
   private destroyed = false
+  private renderSeq = 0
   private cache: TextCache = { nodes: [], starts: [], total: 0 }
   private parser = new DOMParser()
   private serializer = new XMLSerializer()
@@ -64,7 +73,7 @@ class MobiEngine implements ReaderEngine {
     this.annotations = payload.annotations ?? []
 
     if (!payload.fileData) throw new Error('MOBI 文件数据缺失')
-    const mobi = new MOBI({ unzlib: undefined })
+    const mobi = new MOBI({ unzlib: unzlibBytes })
     const book = (await mobi.open(new Blob([payload.fileData]))) as FoliateBook
     this.book = book
     const headers = (mobi as unknown as {
@@ -180,8 +189,10 @@ class MobiEngine implements ReaderEngine {
 
   private async showChapter(index: number, restoreRatio = 0): Promise<void> {
     if (this.destroyed) return
+    // 并发保护：只应用最后一次翻章请求，丢弃被覆盖的过期渲染
+    const seq = ++this.renderSeq
     const html = await this.loadChapterHtml(index)
-    if (this.destroyed) return
+    if (this.destroyed || seq !== this.renderSeq) return
     this.current = index
 
     await new Promise<void>((resolve) => {
@@ -193,6 +204,7 @@ class MobiEngine implements ReaderEngine {
       frame.addEventListener('load', onLoad)
       frame.srcdoc = html
     })
+    if (this.destroyed || seq !== this.renderSeq) return
 
     const doc = this.iframe.contentDocument ?? this.iframe.contentWindow!.document
     const win = this.iframe.contentWindow!
@@ -331,6 +343,8 @@ class MobiEngine implements ReaderEngine {
       if (ann.locator.chapter !== this.current) continue
       if (ann.locator.start >= ann.locator.end) continue
       wrapRangeWithMark(doc, this.cache, ann)
+      // splitText 会使 cache 失效，逐个重建保证后续高亮定位准确
+      this.cache = buildTextCache(doc.body)
     }
   }
 

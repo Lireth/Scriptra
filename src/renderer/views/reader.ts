@@ -65,6 +65,11 @@ export class ReaderView {
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private selection: SelectionInfo | null = null
   private popup: HTMLElement | null = null
+  private openSeq = 0
+  private progressEl: HTMLElement | null = null
+  private progressTrack: HTMLElement | null = null
+  private progressFill: HTMLElement | null = null
+  private progressLabelEl: HTMLElement | null = null
 
   constructor(root: HTMLElement) {
     this.root = root
@@ -153,6 +158,7 @@ export class ReaderView {
   async open(book: Book): Promise<void> {
     if (this.engine) this.closeEngine()
     this.book = book
+    const seq = ++this.openSeq
 
     // 视图切换
     document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'))
@@ -168,14 +174,22 @@ export class ReaderView {
     document.getElementById('reader-settings')?.classList.add('hidden')
 
     let payload
+    let annotations
     try {
-      payload = await window.scriptra.openBook(book.id)
-      this.annotations = await window.scriptra.listAnnotations(book.id)
+      // 两请求相互独立，并行拉取缩短白屏
+      ;[payload, annotations] = await Promise.all([
+        window.scriptra.openBook(book.id),
+        window.scriptra.listAnnotations(book.id),
+      ])
+      // 双击打开不同书时，丢弃过期请求结果
+      if (seq !== this.openSeq || this.book?.id !== book.id) return
     } catch (e) {
+      if (seq !== this.openSeq) return
       toast(`打开书籍失败：${e instanceof Error ? e.message : String(e)}`, 'error')
       this.close()
       return
     }
+    this.annotations = annotations
 
     const cb: EngineCallbacks = {
       onProgress: (p) => {
@@ -207,12 +221,15 @@ export class ReaderView {
 
     try {
       await loadEngineScript(book.format)
+      if (seq !== this.openSeq || this.book?.id !== book.id) return
       this.engine = getEngine(book.format)
       await this.engine.open(container, { ...payload, annotations: this.annotations }, this.style, cb)
+      if (seq !== this.openSeq) return
       this.engine.applyStyle(this.style)
       this.applyThemeToChrome()
       this.renderAnnPanel()
     } catch (e) {
+      if (seq !== this.openSeq) return
       toast(`阅读引擎加载失败：${e instanceof Error ? e.message : String(e)}`, 'error', 5000)
       window.scriptra.log('error', `阅读引擎失败: ${e instanceof Error ? e.stack : String(e)}`)
       this.close()
@@ -239,17 +256,23 @@ export class ReaderView {
   /* ------------------------------ 进度 ------------------------------ */
 
   private updateProgressUi(): void {
-    const bar = document.getElementById('reader-progress')
-    if (bar) {
+    // 滚动每帧触发，复用子元素仅更新文本与宽度，避免整棵子树反复重建
+    const bar = this.progressEl ??= document.getElementById('reader-progress')
+    if (!bar) return
+    if (!this.progressFill || !this.progressLabelEl || bar.firstChild !== this.progressTrack) {
       bar.innerHTML = ''
       const track = el('div', 'progress-track')
       const fill = el('div', 'progress-fill')
-      fill.style.width = `${(this.percent * 100).toFixed(1)}%`
       track.appendChild(fill)
+      const label = el('span', 'progress-label')
       bar.appendChild(track)
-      bar.appendChild(el('span', 'progress-label',
-        `${this.progressLabel} · ${Math.round(this.percent * 100)}%`))
+      bar.appendChild(label)
+      this.progressTrack = track
+      this.progressFill = fill
+      this.progressLabelEl = label
     }
+    this.progressFill.style.width = `${(this.percent * 100).toFixed(1)}%`
+    this.progressLabelEl.textContent = `${this.progressLabel} · ${Math.round(this.percent * 100)}%`
   }
 
   private scheduleSaveProgress(percent: number, detail: unknown): void {
@@ -685,6 +708,12 @@ export class ReaderView {
   private positionPopup(popup: HTMLElement, rect: DOMRect | null): void {
     const container = document.getElementById('reader-container')
     container?.appendChild(popup)
+    // 点击弹窗按钮时阻止焦点移出 iframe，否则 iframe 内选区折叠会提前销毁弹窗（按钮点不到）
+    popup.addEventListener('mousedown', (e) => {
+      const t = e.target as HTMLElement
+      if (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT') return
+      e.preventDefault()
+    })
     const cw = container?.getBoundingClientRect()
     if (!cw) return
     const pw = popup.offsetWidth || 220

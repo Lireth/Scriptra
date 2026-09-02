@@ -47,6 +47,12 @@ function attr(o: unknown, name: string): string {
   return a === undefined ? '' : String(a)
 }
 
+/** 安全 URI 解码：非法 % 编码（如 %ZZ）会抛 URIError，畸形 EPUB 不应导致导入失败 */
+function safeDecode(s: string): string {
+  if (!s) return s
+  try { return decodeURIComponent(s) } catch { return s }
+}
+
 export interface EpubParseResult {
   meta: ParsedMeta
   cover: CoverData | null
@@ -95,7 +101,7 @@ export async function parseEpubZip(
     const href = attr(it, 'href')
     if (!href) continue
     idMap.set(attr(it, 'id'), {
-      href: decodeURIComponent(href),
+      href: safeDecode(href),
       mediaType: attr(it, 'media-type'),
       properties: attr(it, 'properties'),
     })
@@ -126,7 +132,8 @@ export async function parseEpubZip(
     if (entry) {
       const mime = coverHref.endsWith('.png') ? 'image/png'
         : coverHref.endsWith('.gif') ? 'image/gif'
-        : coverHref.endsWith('.webp') ? 'image/webp' : 'image/jpeg'
+        : coverHref.endsWith('.webp') ? 'image/webp'
+        : coverHref.endsWith('.svg') ? 'image/svg+xml' : 'image/jpeg'
       cover = { mime, bytes: await entry.async('nodebuffer') }
     }
   }
@@ -161,7 +168,7 @@ function resolvePath(baseDir: string, href: string): string {
 }
 
 function entryAt(zip: JSZip, p: string): JSZip.JSZipObject | null {
-  return zip.file(p) ?? zip.file(decodeURIComponent(p)) ?? null
+  return zip.file(p) ?? zip.file(safeDecode(p)) ?? null
 }
 
 async function findOpfPath(zip: JSZip): Promise<string> {
@@ -172,7 +179,7 @@ async function findOpfPath(zip: JSZip): Promise<string> {
   const rootfiles = asArray<AnyObj>((root.rootfiles as AnyObj | undefined ?? {}).rootfile)
   for (const rf of rootfiles) {
     const full = attr(rf, 'full-path')
-    if (full) return decodeURIComponent(full)
+    if (full) return safeDecode(full)
   }
   throw new Error('container.xml 中未找到 OPF')
 }
@@ -202,7 +209,7 @@ async function extractToc(
           for (const p of points) {
             const label = firstText(((p.navLabel ?? {}) as AnyObj).text)
             const src = attr((p.content ?? {}) as AnyObj, 'src')
-            const href = resolvePath(opfDir, decodeURIComponent(src))
+            const href = resolvePath(opfDir, safeDecode(src))
             if (href && toSpineIdx(href) >= 0) items.push({ href, title: label, level })
             const children = asArray<AnyObj>(p.navPoint)
             if (children.length) walk(children, level + 1)
@@ -226,11 +233,13 @@ async function extractToc(
       try {
         const html = await entry.async('string')
         const items: TocItem[] = []
-        const re = /<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
+        // 兼容单/双引号与无引号的 href 属性
+        const re = /<a\s[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi
         let m: RegExpExecArray | null
         while ((m = re.exec(html))) {
-          const href = resolvePath(navDir, decodeURIComponent(m[1].replace(/^#/, '')))
-          const title = stripHtml(m[2]).slice(0, 120)
+          const raw = m[1] ?? m[2] ?? m[3] ?? ''
+          const href = resolvePath(navDir, safeDecode(raw.replace(/^#/, '')))
+          const title = stripHtml(m[4]).slice(0, 120)
           if (href && title && toSpineIdx(href) >= 0) items.push({ href, title, level: 0 })
         }
         if (items.length) return items

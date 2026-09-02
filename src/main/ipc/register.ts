@@ -19,6 +19,10 @@ import {
   buildOpenPayload, closeSessionFor, coverDataUrl, deleteBooks, getEpubResource, importFiles, scanFolder,
 } from '../services/library'
 import { getSettings, setSettings } from '../services/settings'
+import {
+  ANN_TYPES, annotationLocator, bool, FORMATS, importPaths, int, oneOf, optStr,
+  progressDetail, ratio, STATUSES, str, strArray,
+} from './validate'
 
 function handle(channel: string, fn: (event: Electron.IpcMainInvokeEvent, ...args: never[]) => unknown): void {
   ipcMain.handle(channel, async (event, ...args) => {
@@ -76,79 +80,87 @@ export function registerIpcHandlers(): void {
   /* ------------------------------ 书库 ------------------------------ */
 
   handle(IPC.LibraryImport, (event, paths: string[]) =>
-    importFiles(Array.isArray(paths) ? paths : [], event.sender) as Promise<ImportOutcome>)
+    importFiles(importPaths(paths), event.sender) as Promise<ImportOutcome>)
 
   handle(IPC.LibraryScan, (event, folder: string) =>
-    scanFolder(String(folder), event.sender) as Promise<ImportOutcome>)
+    scanFolder(str(folder, 1024), event.sender) as Promise<ImportOutcome>)
 
-  handle(IPC.LibraryList, (_e, query: BookQuery) => listBooks(query ?? {}))
+  handle(IPC.LibraryList, (_e, query: BookQuery) => listBooks(sanitizeQuery(query)))
 
-  handle(IPC.LibraryGet, (_e, id: string) => getBook(String(id)))
+  handle(IPC.LibraryGet, (_e, id: string) => getBook(str(id, 64)))
 
   handle(IPC.LibraryUpdate, (_e, id: string, patch: BookUpdatePatch) =>
-    updateBook(String(id), patch ?? {}))
+    updateBook(str(id, 64), sanitizePatch(patch)))
 
   handle(IPC.LibraryRemove, async (_e, ids: string[]) => {
-    const list = Array.isArray(ids) ? ids.map(String) : []
-    await deleteBooks(list)
+    await deleteBooks(strArray(ids, 500, 64))
     return true
   })
 
   handle(IPC.LibraryStats, () => libraryStats())
 
-  handle(IPC.LibraryCover, (_e, id: string) => coverDataUrl(String(id)) ?? '')
+  handle(IPC.LibraryCover, (_e, id: string) => coverDataUrl(str(id, 64)) ?? '')
 
   handle(IPC.LibraryContinue, () => lastReadBook())
 
   /* ------------------------------ 阅读 ------------------------------ */
 
   handle(IPC.BookOpen, async (_e, id: string) => {
-    const book = getBook(String(id))
+    const book = getBook(str(id, 64))
     if (!book) throw new Error('书籍不存在')
     const { payload } = await buildOpenPayload(book)
     return payload
   })
 
   handle(IPC.BookClose, (_e, id: string) => {
-    closeSessionFor(String(id))
+    closeSessionFor(str(id, 64))
     return true
   })
 
   handle(IPC.BookGetResource, async (_e, id: string, resPath: string) => {
-    const res = await getEpubResource(String(id), String(resPath))
+    const res = await getEpubResource(str(id, 64), str(resPath, 2048))
     if (!res) throw new Error(`资源不存在: ${resPath}`)
     return res
   })
 
   handle(IPC.BookSetProgress, (_e, id: string, progress: number, detail: unknown) => {
-    setBookProgress(String(id), Number(progress) || 0, detail as never)
+    setBookProgress(str(id, 64), ratio(progress), progressDetail(detail))
     return true
   })
 
   handle(IPC.BookIndexText, (_e, id: string, text: string) => {
-    indexBookText(String(id), String(text ?? ''))
+    // 截断到索引上限，避免超大字符串在 cjkSpace 正则中长时间占用主进程
+    indexBookText(str(id, 64), str(text, 600_000))
     return true
   })
 
   /* ------------------------------ 注释 ------------------------------ */
 
-  handle(IPC.AnnList, (_e, bookId: string) => listAnnotations(String(bookId)))
+  handle(IPC.AnnList, (_e, bookId: string) => listAnnotations(str(bookId, 64)))
 
-  handle(IPC.AnnAdd, (_e, data: Omit<Annotation, 'id' | 'createdAt' | 'updatedAt'>) =>
-    addAnnotation({
-      bookId: String(data.bookId),
-      type: data.type,
-      color: data.color,
-      text: data.text,
-      note: data.note,
-      locator: data.locator,
-    }))
+  handle(IPC.AnnAdd, (_e, data: Omit<Annotation, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const locator = annotationLocator(data?.locator)
+    if (!locator) throw new Error('非法的批注定位')
+    const bookId = str(data.bookId, 64)
+    if (!getBook(bookId)) throw new Error('书籍不存在')
+    return addAnnotation({
+      bookId,
+      type: oneOf(data.type, ANN_TYPES, 'highlight'),
+      color: str(data.color, 32),
+      text: str(data.text, 4000),
+      note: str(data.note, 8000),
+      locator,
+    })
+  })
 
   handle(IPC.AnnUpdate, (_e, id: string, patch: { color?: string; note?: string }) =>
-    updateAnnotation(String(id), patch ?? {}))
+    updateAnnotation(str(id, 64), {
+      color: optStr(patch?.color, 32),
+      note: optStr(patch?.note, 8000),
+    }))
 
   handle(IPC.AnnRemove, (_e, id: string) => {
-    removeAnnotation(String(id))
+    removeAnnotation(str(id, 64))
     return true
   })
 
@@ -156,13 +168,46 @@ export function registerIpcHandlers(): void {
 
   handle(IPC.SettingsGet, () => getSettings())
 
-  handle(IPC.SettingsSet, (_e, patch: Record<string, unknown>) => setSettings(patch as never))
+  handle(IPC.SettingsSet, (_e, patch: Record<string, unknown>) =>
+    setSettings({ scanFolders: strArray(patch?.scanFolders, 100, 1024) }))
 
   handle(IPC.LogRenderer, (_e, level: string, message: string) => {
-    const msg = `[渲染进程] ${message}`
-    if (level === 'error') log.renderer.error(msg)
-    else if (level === 'warn') log.renderer.warn(msg)
+    const msg = `[渲染进程] ${str(message, 8000)}`
+    const lv = str(level, 16)
+    if (lv === 'error') log.renderer.error(msg)
+    else if (lv === 'warn') log.renderer.warn(msg)
     else log.renderer.info(msg)
     return true
   })
+}
+
+/** 书库查询参数净化 */
+function sanitizeQuery(q: BookQuery | undefined): BookQuery {
+  const out: BookQuery = {}
+  if (!q || typeof q !== 'object') return out
+  if (typeof q.q === 'string') out.q = str(q.q, 200)
+  if (q.status && q.status !== 'all') out.status = oneOf(q.status, STATUSES, 'unread')
+  else if (q.status === 'all') out.status = 'all'
+  if (typeof q.favorite === 'boolean') out.favorite = q.favorite
+  if (typeof q.category === 'string') out.category = str(q.category, 200)
+  if (typeof q.author === 'string') out.author = str(q.author, 200)
+  if (q.format) out.format = oneOf(q.format, FORMATS, 'epub')
+  if (q.sort) out.sort = q.sort
+  out.limit = int(q.limit, 120, 1, 500)
+  out.offset = int(q.offset, 0, 0, Number.MAX_SAFE_INTEGER)
+  return out
+}
+
+/** 书籍更新补丁净化（仅保留白名单字段，做枚举/数值/长度校验） */
+function sanitizePatch(p: BookUpdatePatch | undefined): BookUpdatePatch {
+  const out: BookUpdatePatch = {}
+  if (!p || typeof p !== 'object') return out
+  if (p.title !== undefined) out.title = str(p.title, 400)
+  if (p.author !== undefined) out.author = str(p.author, 200)
+  if (p.category !== undefined) out.category = str(p.category, 200)
+  if (p.description !== undefined) out.description = str(p.description, 20000)
+  if (p.status !== undefined) out.status = oneOf(p.status, STATUSES, 'unread')
+  if (p.rating !== undefined) out.rating = int(p.rating, 0, 0, 5)
+  if (p.favorite !== undefined) out.favorite = bool(p.favorite)
+  return out
 }
