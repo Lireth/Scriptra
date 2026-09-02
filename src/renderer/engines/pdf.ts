@@ -65,6 +65,9 @@ class PdfEngine implements ReaderEngine {
   private resizeTimer: ReturnType<typeof setTimeout> | null = null
   private lastLayoutWidth = 0
   private renderQueued = false
+  /** 性能基线：打开时刻与首页渲染完成标记 */
+  private openedAt = 0
+  private firstPageLogged = false
 
   async open(
     container: HTMLElement,
@@ -139,6 +142,7 @@ class PdfEngine implements ReaderEngine {
     const detail = payload.progressDetail
     const startPage = detail && detail.kind === 'pdf' ? Math.max(1, Math.min(detail.page, n)) : 1
     this.lastLayoutWidth = this.pageWidthPx()
+    this.openedAt = performance.now()
     await this.renderVisible()
     if (startPage > 1) {
       const slot = this.slots[startPage - 1]
@@ -304,6 +308,11 @@ class PdfEngine implements ReaderEngine {
       if (this.destroyed || slot.renderToken !== token) return
 
       slot.rendered = true
+      if (!this.firstPageLogged) {
+        this.firstPageLogged = true
+        window.scriptra.log('info',
+          `[perf] PDF 首页渲染: ${Math.round(performance.now() - this.openedAt)}ms`)
+      }
       this.drawOverlays(slot)
     } catch (e) {
       if ((e as { name?: string })?.name !== 'RenderingCancelledException') {
@@ -436,12 +445,13 @@ class PdfEngine implements ReaderEngine {
     try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
   }
 
-  focusAnnotation(annId: string): void {
+  focusAnnotation(annId: string): boolean {
     const mark = this.scroller?.querySelector(`.pdf-hl[data-ann="${annId}"]`) as HTMLElement | null
-    if (!mark) return
+    if (!mark) return false
     mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
     mark.classList.add('flash')
     setTimeout(() => mark.classList.remove('flash'), 1200)
+    return true
   }
 
   tocEntries(): TocEntry[] {

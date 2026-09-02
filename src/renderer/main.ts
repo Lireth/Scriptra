@@ -61,7 +61,10 @@ document.addEventListener('keydown', (e) => {
 
 /* ------------------------------ 启动 ------------------------------ */
 
-void libraryView.refresh()
+// 性能基线：书库首屏数据拉取 + 渲染完成时刻（页面导航起算）
+void libraryView.refresh().then(() => {
+  window.scriptra.log('info', `[perf] 书库首屏就绪: ${Math.round(performance.now())}ms`)
+})
 
 window.scriptra.getInfo().then((info) => {
   document.documentElement.dataset.appVersion = info.version

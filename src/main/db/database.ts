@@ -138,7 +138,8 @@ function migrate(d: DatabaseSync): void {
   `)
 
   // FTS 被重建（旧版普通表升级）后，正文内容无法从 books 表恢复：
-  // 复位 content_indexed，使 MOBI/PDF 在下次打开时惰性重建正文索引；
+  // 复位 content_indexed，打开书籍时由 buildOpenPayload 惰性重建
+  // （EPUB/TXT/PDF 在主进程提取，MOBI 由渲染引擎回传文本）；
   // 同时用 books 表现有书名/作者回填 FTS，保证元数据检索立即可用。
   // 注意：仅在实际发生重建时复位，避免健康库升级后误清 EPUB/TXT 的正文索引。
   if (ftsRebuilt) {

@@ -92,6 +92,14 @@ class EpubEngine extends DocEngine {
     // 媒体资源 -> data URL
     await rewriteMedia(doc, baseDir, this)
 
+    // 收集 head 中的样式（外链 CSS 内联结果 + 原书内联样式）。
+    // wrapChapterDoc 只序列化 body，head 内样式需经 extraHead 带入，否则整章排版丢失。
+    // 跳过 body 内的 <style>（极少见），它们已随 body.innerHTML 序列化，避免重复注入。
+    const headCss = [...doc.querySelectorAll('style')]
+      .filter((st) => !doc.body.contains(st))
+      .map((st) => st.textContent || '')
+      .join('\n')
+
     // 移除内联事件与 javascript: 链接
     doc.querySelectorAll('[onclick], [onload], [onerror]').forEach((n) => {
       for (const attr of [...n.attributes]) {
@@ -100,7 +108,7 @@ class EpubEngine extends DocEngine {
     })
     doc.querySelectorAll('a[href^="javascript:"]').forEach((a) => a.removeAttribute('href'))
 
-    return this.wrapChapterDoc(doc.body.innerHTML)
+    return this.wrapChapterDoc(doc.body.innerHTML, headCss ? `<style>${headCss}</style>` : '')
   }
 
   private async fetchText(path: string): Promise<string | null> {

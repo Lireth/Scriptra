@@ -23,6 +23,9 @@ const isE2E = process.env.SCRIPTRA_E2E === '1'
 const INDEX_PATH = path.join(__dirname, '../renderer/index.html')
 const INDEX_URL = pathToFileURL(INDEX_PATH).href
 
+/** 性能基线：主进程模块加载时刻（冷启动各阶段耗时以此为起点，写入 logs/main.log） */
+const BOOT_T0 = performance.now()
+
 /** @type {BrowserWindow | null} */
 let mainWindow: BrowserWindow | null = null
 
@@ -123,6 +126,7 @@ function createMainWindow(): void {
   attachWindowGuards(win)
 
   win.once('ready-to-show', () => {
+    log.info(`[perf] 窗口首帧就绪(ready-to-show): ${Math.round(performance.now() - BOOT_T0)}ms`)
     if (!isE2E) win.show()
   })
 

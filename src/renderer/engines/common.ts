@@ -318,6 +318,8 @@ export abstract class DocEngine implements ReaderEngine {
       if (target) {
         ;(target as HTMLElement).scrollIntoView({ block: 'start' })
         this.reportProgress()
+        // 锚点路径同样要通知外壳章节已变更，保证章节下拉与目录高亮同步
+        this.cb.onChapterChange(index)
         return
       }
     }
@@ -508,12 +510,13 @@ export abstract class DocEngine implements ReaderEngine {
     try { this.iwin.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
   }
 
-  focusAnnotation(annId: string): void {
+  focusAnnotation(annId: string): boolean {
     const mark = this.idoc?.querySelector(`mark[data-ann="${annId}"]`) as HTMLElement | null
-    if (!mark) return
+    if (!mark) return false
     mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
     mark.classList.add('flash')
     setTimeout(() => mark.classList.remove('flash'), 1200)
+    return true
   }
 
   destroy(): void {

@@ -49,8 +49,11 @@ export interface ReaderEngine {
   applyStyle(style: ReaderStyle): void
   applyAnnotations(list: Annotation[]): void
   clearSelection(): void
-  /** 滚动定位到指定批注标记（标记位于引擎自有文档内，外壳无法直接查询） */
-  focusAnnotation?(annId: string): void
+  /**
+   * 滚动定位到指定批注标记（标记位于引擎自有文档内，外壳无法直接查询）。
+   * 返回是否找到标记：章节/PDF 页尚未渲染完成时为 false，调用方可轮询重试。
+   */
+  focusAnnotation?(annId: string): boolean
   nextChapter(): Promise<boolean>
   prevChapter(): Promise<boolean>
   destroy(): void

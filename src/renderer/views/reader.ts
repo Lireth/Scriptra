@@ -156,6 +156,8 @@ export class ReaderView {
   /* ------------------------------ 打开 / 关闭 ------------------------------ */
 
   async open(book: Book): Promise<void> {
+    // 性能基线：从打开请求到引擎渲染完成的全链路耗时（含 openBook IPC + 引擎脚本加载）
+    const openT0 = performance.now()
     if (this.engine) this.closeEngine()
     this.book = book
     const seq = ++this.openSeq
@@ -228,6 +230,8 @@ export class ReaderView {
       this.engine.applyStyle(this.style)
       this.applyThemeToChrome()
       this.renderAnnPanel()
+      window.scriptra.log('info',
+        `[perf] 打开书籍(${book.format}): ${Math.round(performance.now() - openT0)}ms`)
     } catch (e) {
       if (seq !== this.openSeq) return
       toast(`阅读引擎加载失败：${e instanceof Error ? e.message : String(e)}`, 'error', 5000)
@@ -367,17 +371,26 @@ export class ReaderView {
   private async jumpToAnn(ann: Annotation): Promise<void> {
     const loc = ann.locator
     if (loc.kind === 'text' || loc.kind === 'doc') {
-      const ratio = loc.kind === 'doc' ? loc.ratio : 0
-      await this.engine?.goChapter(loc.chapter, ratio)
-      if (loc.kind === 'text') {
-        setTimeout(() => this.engine?.focusAnnotation?.(ann.id), 350)
-      }
+      await this.engine?.goChapter(loc.chapter, loc.kind === 'doc' ? loc.ratio : 0)
+      if (loc.kind === 'text') await this.focusAnnotationWhenReady(ann.id)
     } else if (loc.kind === 'pdf') {
       await this.engine?.goChapter(loc.page - 1)
-      setTimeout(() => this.engine?.focusAnnotation?.(ann.id), 400)
+      await this.focusAnnotationWhenReady(ann.id)
     } else if (loc.kind === 'page') {
       // PDF 书签：跳转到页并恢复页内偏移
       await this.engine?.goChapter(loc.page - 1, loc.top)
+    }
+  }
+
+  /**
+   * 等待批注标记渲染完成后聚焦：goChapter 返回只代表章节文档已挂载，
+   * PDF 页面绘制、快速连续跳章等场景下标记可能稍后才出现，轮询直至命中或超时。
+   */
+  private async focusAnnotationWhenReady(annId: string, timeoutMs = 2000): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (this.engine?.focusAnnotation?.(annId)) return
+      await new Promise((r) => setTimeout(r, 80))
     }
   }
 

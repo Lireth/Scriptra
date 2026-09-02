@@ -12,9 +12,9 @@ import JSZip from 'jszip'
 import { randomUUID } from 'node:crypto'
 import { IPC, type Book, type BookFormat, type BookManifest, type ImportOutcome, type ImportProgressEvent, type OpenBookPayload } from '../../shared/types'
 import { log } from '../logger'
-import { findByHash, getBook, getBookPaths, insertBook, removeBooks } from '../db/books'
+import { findByHash, getBook, getBookPaths, indexBookText, insertBook, removeBooks } from '../db/books'
 import { cjkSpace, getDb } from '../db/database'
-import { parseEpubFile, parseEpubZip } from '../parsers/epub'
+import { extractEpubText, parseEpubFile, parseEpubZip } from '../parsers/epub'
 import { parseMobiFile } from '../parsers/mobimeta'
 import { parsePdfFile } from '../parsers/pdfmeta'
 import { decodeText, parseTxtFile, splitChapters } from '../parsers/txt'
@@ -288,6 +288,9 @@ export async function buildOpenPayload(book: Book): Promise<{
   payload: Omit<OpenBookPayload, 'annotations'>
 }> {
   const s = await getSession(book)
+  // FTS 重建迁移会把 content_indexed 复位；除 MOBI（渲染引擎回传文本）外，
+  // 在打开书籍时惰性重建正文索引，避免全文检索永久丢失。不阻塞打开流程。
+  void ensureContentIndexed(book, s)
   const base = {
     id: book.id,
     format: book.format,
@@ -319,6 +322,43 @@ export async function buildOpenPayload(book: Book): Promise<{
         chapterStarts: starts,
       },
     },
+  }
+}
+
+/** 本次运行内已尝试重建正文索引的书：无正文书籍（如扫描版 PDF）不反复重试 */
+const reindexAttempted = new Set<string>()
+
+/**
+ * 惰性重建正文索引（books_fts 重建迁移后 content_indexed 被复位的书）。
+ * - EPUB：从会话已加载的 zip 直接提取，无额外 IO
+ * - TXT：解码会话 buffer
+ * - PDF：后台重新跑主进程提取器（有让步，不阻塞窗口消息）
+ * - MOBI：交由渲染引擎打开后回传文本（支持 HUFF/CDIC），主进程不处理
+ * 提取成功且有文本才落库置位 content_indexed；空结果仅本次运行内不重试。
+ */
+async function ensureContentIndexed(book: Book, s: Session): Promise<void> {
+  if (book.contentIndexed || reindexAttempted.has(book.id)) return
+  reindexAttempted.add(book.id)
+  try {
+    let text = ''
+    if (book.format === 'epub' && s.zip && s.manifest) {
+      text = await extractEpubText(s.zip, s.manifest)
+    } else if (book.format === 'txt') {
+      text = decodeText(s.buffer)
+    } else if (book.format === 'pdf') {
+      const paths = getBookPaths(book.id)
+      if (!paths?.storedPath) return
+      const r = await parsePdfFile(paths.storedPath)
+      text = r.contentText
+    } else {
+      return
+    }
+    if (text.trim()) {
+      indexBookText(book.id, text)
+      log.info(`已重建正文索引: ${book.title} (${book.format})`)
+    }
+  } catch (e) {
+    log.warn(`正文索引重建失败: ${book.id}`, e)
   }
 }
 

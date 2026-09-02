@@ -252,7 +252,8 @@ async function extractToc(
   return []
 }
 
-async function extractEpubText(zip: JSZip, manifest: BookManifest): Promise<string> {
+/** 提取 spine 全文（导入建索引与 FTS 重建迁移后的惰性重索引共用） */
+export async function extractEpubText(zip: JSZip, manifest: BookManifest): Promise<string> {
   const parts: string[] = []
   let total = 0
   for (const s of manifest.spine) {
