@@ -48,7 +48,7 @@ export function registerIpcHandlers(): void {
 
   handle(IPC.DialogPickFiles, async (event) => {
     const win = senderWindow(event)
-    const r = await dialog.showOpenDialog(win!, {
+    const opts: Electron.OpenDialogOptions = {
       title: '导入电子书',
       properties: ['openFile', 'multiSelections'],
       filters: [
@@ -58,16 +58,18 @@ export function registerIpcHandlers(): void {
         { name: 'MOBI / AZW', extensions: ['mobi', 'azw'] },
         { name: 'TXT', extensions: ['txt'] },
       ],
-    })
+    }
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return r.canceled ? [] : r.filePaths
   })
 
   handle(IPC.DialogPickFolder, async (event) => {
     const win = senderWindow(event)
-    const r = await dialog.showOpenDialog(win!, {
+    const opts: Electron.OpenDialogOptions = {
       title: '选择要扫描的文件夹',
       properties: ['openDirectory'],
-    })
+    }
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return r.canceled ? null : r.filePaths[0] ?? null
   })
 

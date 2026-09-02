@@ -584,6 +584,8 @@ select.form-input { padding: 6px 8px; }
   mix-blend-mode: multiply;
   border-radius: 2px;
   opacity: .82;
+  pointer-events: auto;
+  cursor: pointer;
 }
 .pdf-hl:hover { opacity: 1; outline: 1px solid rgba(0,0,0,.25); }
 

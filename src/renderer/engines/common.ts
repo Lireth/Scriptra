@@ -207,6 +207,14 @@ export function readerStyleCss(style: ReaderStyle): string {
     }
     body.scriptra-body .scriptra-hl { border-radius: 2px; padding: 0 1px; }
     body.scriptra-body .scriptra-hl:hover { filter: brightness(0.94); }
+    body.scriptra-body .scriptra-hl.flash {
+      outline: 2px solid #e07b39;
+      animation: scriptra-flash 1.2s ease-out;
+    }
+    @keyframes scriptra-flash {
+      0% { box-shadow: 0 0 0 4px rgba(224, 123, 57, 0.6); }
+      100% { box-shadow: 0 0 0 4px rgba(224, 123, 57, 0); }
+    }
     body.scriptra-body ::selection { background: rgba(120, 160, 220, 0.45); }
     /* 隐藏书内原有固定元素，避免遮挡阅读 */
     body.scriptra-body div[class*="fixed"], body.scriptra-body [style*="position:fixed"],
@@ -327,6 +335,8 @@ export abstract class DocEngine implements ReaderEngine {
 
     doc.onmouseup = () => this.emitSelection()
     doc.onkeyup = () => this.emitSelection()
+    // 焦点进入 iframe 后键盘事件不会冒泡到主文档，这里转发给外壳统一处理
+    doc.onkeydown = (e) => this.cb.onKey?.(e)
     doc.onselectionchange = () => {
       const sel = win.getSelection()
       if (!sel || sel.isCollapsed) this.cb.onSelection(null)
@@ -439,14 +449,15 @@ export abstract class DocEngine implements ReaderEngine {
 
   /* ------------------------------ 接口实现 ------------------------------ */
 
-  async goChapter(index: number): Promise<void> {
+  async goChapter(index: number, ratio = 0): Promise<void> {
     const idx = Math.max(0, Math.min(index, this.chapterCount - 1))
     if (idx === this.current) {
-      this.iwin.scrollTo(0, 0)
+      if (ratio > 0) this.scrollToRatio(ratio)
+      else this.iwin.scrollTo(0, 0)
       this.reportProgress()
       return
     }
-    await this.showChapter(idx, 0)
+    await this.showChapter(idx, ratio)
   }
 
   async nextChapter(): Promise<boolean> {
@@ -488,6 +499,14 @@ export abstract class DocEngine implements ReaderEngine {
 
   clearSelection(): void {
     try { this.iwin.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
+  }
+
+  focusAnnotation(annId: string): void {
+    const mark = this.idoc?.querySelector(`mark[data-ann="${annId}"]`) as HTMLElement | null
+    if (!mark) return
+    mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    mark.classList.add('flash')
+    setTimeout(() => mark.classList.remove('flash'), 1200)
   }
 
   destroy(): void {

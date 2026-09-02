@@ -41,6 +41,8 @@ export class LibraryView {
   private coverCache = new Map<string, string>()
   private loadedCount = 0
   private loadSeq = 0
+  private hasMore = false
+  private loadingMore = false
   private coverObserver: IntersectionObserver | null = null
 
   /** 由 main.ts 注入：打开阅读器 */
@@ -65,12 +67,19 @@ export class LibraryView {
     const progress = el('div', 'import-progress hidden')
     progress.id = 'import-progress'
     const gridWrap = el('div', 'lib-content-wrap')
+    gridWrap.id = 'lib-scroll'
     const grid = el('div', 'book-grid')
     grid.id = 'book-container'
     const empty = el('div', 'empty-state hidden')
     empty.id = 'empty-state'
     gridWrap.appendChild(grid)
     gridWrap.appendChild(empty)
+    // 触底加载：书库超过单页上限时继续拉取后续书籍
+    gridWrap.addEventListener('scroll', () => {
+      if (!this.hasMore || this.loadingMore) return
+      const near = gridWrap.scrollHeight - gridWrap.scrollTop - gridWrap.clientHeight < 400
+      if (near) void this.loadMore()
+    }, { passive: true })
 
     main.appendChild(toolbar)
     main.appendChild(progress)
@@ -239,8 +248,11 @@ export class LibraryView {
 
   /* ------------------------------ 数据 ------------------------------ */
 
+  private static readonly PAGE_SIZE = 120
+
   async refresh(): Promise<void> {
     const seq = ++this.loadSeq
+    this.loadingMore = false
     const [books, stats] = await Promise.all([
       window.scriptra.listBooks({
         q: this.state.q || undefined,
@@ -249,7 +261,7 @@ export class LibraryView {
         category: this.state.category || undefined,
         author: this.state.author || undefined,
         sort: this.state.sort,
-        limit: 120,
+        limit: LibraryView.PAGE_SIZE,
       }),
       window.scriptra.stats(),
     ])
@@ -257,26 +269,36 @@ export class LibraryView {
     this.books = books
     this.stats = stats
     this.loadedCount = books.length
+    // 第一页填满才可能存在下一页（不依赖 stats.total，筛选/搜索时其值不代表结果集大小）
+    this.hasMore = books.length >= LibraryView.PAGE_SIZE
     this.renderSidebar()
     this.renderBooks()
   }
 
   async loadMore(): Promise<void> {
+    if (this.loadingMore || !this.hasMore) return
+    this.loadingMore = true
     const seq = ++this.loadSeq
-    const more = await window.scriptra.listBooks({
-      q: this.state.q || undefined,
-      status: this.state.status,
-      favorite: this.state.favorite || undefined,
-      category: this.state.category || undefined,
-      author: this.state.author || undefined,
-      sort: this.state.sort,
-      limit: 120,
-      offset: this.loadedCount,
-    })
-    if (seq !== this.loadSeq || !more.length) return
-    this.books.push(...more)
-    this.loadedCount += more.length
-    this.renderBooks()
+    try {
+      const more = await window.scriptra.listBooks({
+        q: this.state.q || undefined,
+        status: this.state.status,
+        favorite: this.state.favorite || undefined,
+        category: this.state.category || undefined,
+        author: this.state.author || undefined,
+        sort: this.state.sort,
+        limit: LibraryView.PAGE_SIZE,
+        offset: this.loadedCount,
+      })
+      if (seq !== this.loadSeq) return
+      if (!more.length) { this.hasMore = false; return }
+      this.books.push(...more)
+      this.loadedCount += more.length
+      if (more.length < LibraryView.PAGE_SIZE) this.hasMore = false
+      this.renderBooks()
+    } finally {
+      this.loadingMore = false
+    }
   }
 
   /* ------------------------------ 渲染 ------------------------------ */

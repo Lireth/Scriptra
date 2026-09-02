@@ -63,6 +63,8 @@ function rowToBook(r: BookRow): Book {
 }
 
 export interface InsertBook {
+  /** 可预先生成 id（导入流程需要先以 id 命名落盘文件，再入库） */
+  id?: string
   title: string
   author: string
   format: BookFormat
@@ -81,7 +83,7 @@ export interface InsertBook {
 
 export function insertBook(b: InsertBook): Book {
   const d = getDb()
-  const id = randomUUID()
+  const id = b.id ?? randomUUID()
   const now = Date.now()
   d.prepare(`
     INSERT INTO books (id, title, author, format, category, description, publisher, language,
@@ -226,8 +228,10 @@ export function setBookProgress(id: string, progress: number, detail: ProgressDe
   const book = getBook(id)
   if (!book) return
   let status = book.status
-  if (progress >= 0.98) status = 'finished'
-  else if (progress > 0.002 && status === 'unread') status = 'reading'
+  // 仅在"正在阅读"时自动升级为已读完；用户手动标记的"未读"不被覆盖
+  if (progress >= 0.98) {
+    if (status === 'reading') status = 'finished'
+  } else if (progress > 0.002 && status === 'unread') status = 'reading'
   d.prepare(`
     UPDATE books SET progress = ?, progress_detail = ?, status = ?, last_read_at = ?, updated_at = ?
     WHERE id = ?
@@ -248,15 +252,18 @@ export function isContentIndexed(id: string): boolean {
 
 function indexSearchable(id: string, title?: string, author?: string, content?: string): void {
   const d = getDb()
+  const prev = (d.prepare('SELECT title, author, content FROM books_fts WHERE book_id = ?').get(id) as
+    { title: string; author: string; content: string } | undefined)
   d.prepare('DELETE FROM books_fts WHERE book_id = ?').run(id)
-  const existing = title === undefined
+  const book = title === undefined || author === undefined
     ? (d.prepare('SELECT title, author FROM books WHERE id = ?').get(id) as { title: string; author: string } | undefined)
     : undefined
   d.prepare('INSERT INTO books_fts (book_id, title, author, content) VALUES (?, ?, ?, ?)').run(
     id,
-    cjkSpace(title ?? existing?.title ?? ''),
-    cjkSpace(author ?? existing?.author ?? ''),
-    content ?? '',
+    cjkSpace(title ?? book?.title ?? prev?.title ?? ''),
+    cjkSpace(author ?? book?.author ?? prev?.author ?? ''),
+    // content 为 undefined 时保留旧正文，避免编辑书名/作者把全文索引抹掉
+    content ?? prev?.content ?? '',
   )
 }
 

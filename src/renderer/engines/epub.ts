@@ -70,20 +70,22 @@ class EpubEngine extends DocEngine {
 
     const baseDir = href.includes('/') ? href.slice(0, href.lastIndexOf('/')) : ''
 
-    // 外链样式内联
+    // 外链样式内联（fetchCss 已按 CSS 自身目录把 url() 解析为 zip 绝对路径）
     for (const link of [...doc.querySelectorAll('link[rel~="stylesheet"][href]')]) {
       const cssHref = resolveZipPath(baseDir, (link as HTMLLinkElement).getAttribute('href') || '')
       const css = await this.fetchCss(cssHref)
       if (css) {
         const style = doc.createElement('style')
+        // 标记为已解析，避免下方二次 rewriteCssUrls 造成路径前缀重复
+        style.dataset.resolved = '1'
         style.textContent = css
         link.replaceWith(style)
       } else {
         link.remove()
       }
     }
-    // style 元素内的 url()
-    doc.querySelectorAll('style').forEach((st) => {
+    // 仅处理书中原本的内联 <style>（其 url() 相对 HTML 目录），跳过上面已解析的外链样式
+    doc.querySelectorAll('style:not([data-resolved])').forEach((st) => {
       st.textContent = rewriteCssUrls(st.textContent || '', baseDir, this)
     })
 
@@ -172,7 +174,7 @@ async function rewriteMedia(doc: Document, baseDir: string, engine: EpubEngine):
     handle(media, 'src')
     handle(media, 'poster')
   }
-  // CSS 内的 url()：替换为已解析的 data URL（同步二次扫描）
+  // CSS 内的 url()：此时 url 已由 rewriteCssUrls 解析为 zip 绝对路径，直接取资源
   for (const st of [...doc.querySelectorAll('style')]) {
     const css = st.textContent || ''
     if (!css.includes('url(')) continue
@@ -180,8 +182,7 @@ async function rewriteMedia(doc: Document, baseDir: string, engine: EpubEngine):
     const pairs = await Promise.all(matches.map(async (m) => {
       const raw = m[2].trim()
       if (raw.startsWith('data:') || raw.startsWith('http')) return null
-      const abs = resolveZipPath(baseDir, raw)
-      return [m[0], (await engine.asset(abs)) ?? m[0]] as const
+      return [m[0], (await engine.asset(raw)) ?? m[0]] as const
     }))
     let out = css
     for (const pair of pairs) {

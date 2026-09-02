@@ -202,6 +202,7 @@ export class ReaderView {
         this.highlightToc(idx)
       },
       onMarkClick: (ann) => this.showAnnPopup(ann),
+      onKey: (e) => this.handleKey(e),
     }
 
     try {
@@ -289,6 +290,7 @@ export class ReaderView {
     }
     for (const item of this.tocEntries) {
       const row = el('button', `toc-item${item.index === this.currentChapter ? ' active' : ''}`)
+      row.dataset.idx = String(item.index)
       row.style.paddingLeft = `${14 + item.level * 14}px`
       row.textContent = item.title || `第 ${item.index + 1} 节`
       row.onclick = () => void this.engine?.goChapter(item.index)
@@ -342,26 +344,18 @@ export class ReaderView {
   private async jumpToAnn(ann: Annotation): Promise<void> {
     const loc = ann.locator
     if (loc.kind === 'text' || loc.kind === 'doc') {
-      await this.engine?.goChapter(loc.chapter)
-      // 文本类注释尽量滚到对应位置：本章重建后由应用层简单估算
-      if (loc.kind === 'doc') return
-      setTimeout(() => this.scrollToHighlight(ann), 350)
-    } else if (loc.kind === 'pdf' || loc.kind === 'page') {
-      const page = loc.page
-      await this.engine?.goChapter(page - 1)
-      setTimeout(() => this.scrollToHighlight(ann), 400)
+      const ratio = loc.kind === 'doc' ? loc.ratio : 0
+      await this.engine?.goChapter(loc.chapter, ratio)
+      if (loc.kind === 'text') {
+        setTimeout(() => this.engine?.focusAnnotation?.(ann.id), 350)
+      }
+    } else if (loc.kind === 'pdf') {
+      await this.engine?.goChapter(loc.page - 1)
+      setTimeout(() => this.engine?.focusAnnotation?.(ann.id), 400)
+    } else if (loc.kind === 'page') {
+      // PDF 书签：跳转到页并恢复页内偏移
+      await this.engine?.goChapter(loc.page - 1, loc.top)
     }
-  }
-
-  private scrollToHighlight(ann: Annotation): void {
-    const mark = document.querySelector(`[data-ann="${ann.id}"]`) as HTMLElement | null
-    if (mark) {
-      mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      mark.classList.add('flash')
-      setTimeout(() => mark.classList.remove('flash'), 1200)
-      return
-    }
-    // PDF：无 DOM 标记时按页滚动已由 goChapter 完成
   }
 
   private highlightToc(index: number): void {

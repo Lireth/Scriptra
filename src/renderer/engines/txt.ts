@@ -212,6 +212,14 @@ class TxtEngine implements ReaderEngine {
     try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
   }
 
+  focusAnnotation(annId: string): void {
+    const mark = this.scroller?.querySelector(`mark[data-ann="${annId}"]`) as HTMLElement | null
+    if (!mark) return
+    mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    mark.classList.add('flash')
+    setTimeout(() => mark.classList.remove('flash'), 1200)
+  }
+
   destroy(): void {
     this.destroyed = true
     if (this.onScroll) this.scroller.removeEventListener('scroll', this.onScroll)

@@ -167,6 +167,11 @@ class MobiEngine implements ReaderEngine {
       a { color:#3d6a8f; text-decoration:none; }
       p { margin:0.6em 0; text-align:justify; }
       .scriptra-hl { border-radius:2px; padding:0 1px; }
+      .scriptra-hl.flash { outline:2px solid #e07b39; animation:scriptra-flash 1.2s ease-out; }
+      @keyframes scriptra-flash {
+        0% { box-shadow:0 0 0 4px rgba(224,123,57,0.6); }
+        100% { box-shadow:0 0 0 4px rgba(224,123,57,0); }
+      }
       ::selection { background:rgba(120,160,220,0.45); }
     `
     const inner = doc.body?.innerHTML ?? doc.documentElement.innerHTML
@@ -208,6 +213,8 @@ class MobiEngine implements ReaderEngine {
     // 选区与点击
     doc.onmouseup = () => this.emitSelection(doc, win)
     doc.onkeyup = () => this.emitSelection(doc, win)
+    // 焦点在 iframe 内时键盘事件不冒泡到主文档，转发给外壳
+    doc.onkeydown = (e) => this.cb.onKey?.(e)
     doc.onclick = (e) => {
       const target = e.target as Element
       const mark = target.closest?.('.scriptra-hl') as HTMLElement | null
@@ -264,13 +271,20 @@ class MobiEngine implements ReaderEngine {
     void doc
   }
 
-  async goChapter(index: number): Promise<void> {
+  async goChapter(index: number, ratio = 0): Promise<void> {
     const idx = Math.max(0, Math.min(index, this.chapterCount - 1))
     if (idx === this.current) {
-      this.iframe.contentWindow?.scrollTo(0, 0)
+      const doc = this.iframe?.contentDocument
+      const win = this.iframe?.contentWindow
+      if (doc && win && ratio > 0) {
+        const max = doc.documentElement.scrollHeight - win.innerHeight
+        win.scrollTo(0, Math.max(0, max * Math.max(0, Math.min(1, ratio))))
+      } else {
+        this.iframe?.contentWindow?.scrollTo(0, 0)
+      }
       return
     }
-    await this.showChapter(idx, 0)
+    await this.showChapter(idx, ratio)
   }
 
   async nextChapter(): Promise<boolean> {
@@ -322,6 +336,14 @@ class MobiEngine implements ReaderEngine {
 
   clearSelection(): void {
     try { this.iframe?.contentWindow?.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
+  }
+
+  focusAnnotation(annId: string): void {
+    const mark = this.iframe?.contentDocument?.querySelector(`mark[data-ann="${annId}"]`) as HTMLElement | null
+    if (!mark) return
+    mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    mark.classList.add('flash')
+    setTimeout(() => mark.classList.remove('flash'), 1200)
   }
 
   destroy(): void {

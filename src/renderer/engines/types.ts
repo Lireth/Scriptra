@@ -34,6 +34,8 @@ export interface EngineCallbacks {
   onChapterChange(index: number): void
   /** 点击已存在的高亮标记 */
   onMarkClick(ann: Annotation): void
+  /** iframe 内键盘事件转发（解决焦点在 iframe 时快捷键失效） */
+  onKey?(e: KeyboardEvent): void
 }
 
 export interface ReaderEngine {
@@ -43,10 +45,12 @@ export interface ReaderEngine {
     style: ReaderStyle,
     cb: EngineCallbacks,
   ): Promise<void>
-  goChapter(index: number): Promise<void>
+  goChapter(index: number, ratio?: number): Promise<void>
   applyStyle(style: ReaderStyle): void
   applyAnnotations(list: Annotation[]): void
   clearSelection(): void
+  /** 滚动定位到指定批注标记（标记位于引擎自有文档内，外壳无法直接查询） */
+  focusAnnotation?(annId: string): void
   nextChapter(): Promise<boolean>
   prevChapter(): Promise<boolean>
   destroy(): void

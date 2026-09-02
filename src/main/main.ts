@@ -15,7 +15,7 @@ import { pathToFileURL } from 'node:url'
 import { log } from './logger'
 import { closeDb, getDb } from './db/database'
 import { registerIpcHandlers } from './ipc/register'
-import { libraryDir, coversDir } from './services/library'
+import { libraryDir, coversDir, requestQuitImports } from './services/library'
 
 const isDev = process.argv.includes('--dev') || !app.isPackaged
 /** E2E 自动化测试模式：窗口不显示，通过 CDP 驱动 */
@@ -148,6 +148,11 @@ function createMainWindow(): void {
 
 /* ------------------------------ 应用生命周期 ------------------------------ */
 
+// 第二实例：退出并跳过全部全局副作用，避免与主实例竞态
+if (!gotTheLock) {
+  app.quit()
+} else {
+
 // Windows 任务栏通知分组标识
 app.setAppUserModelId('com.scriptra.desktop')
 
@@ -209,5 +214,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   log.info('应用即将退出')
+  requestQuitImports()
   closeDb()
 })
+
+}
+

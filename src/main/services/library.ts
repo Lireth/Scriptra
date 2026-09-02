@@ -9,9 +9,10 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { app } from 'electron'
 import JSZip from 'jszip'
+import { randomUUID } from 'node:crypto'
 import { IPC, type Book, type BookFormat, type BookManifest, type ImportOutcome, type ImportProgressEvent, type OpenBookPayload } from '../../shared/types'
 import { log } from '../logger'
-import { findByHash, getBookPaths, insertBook, removeBooks } from '../db/books'
+import { findByHash, getBook, getBookPaths, insertBook, removeBooks } from '../db/books'
 import { cjkSpace, getDb } from '../db/database'
 import { parseEpubFile, parseEpubZip } from '../parsers/epub'
 import { parseMobiFile } from '../parsers/mobimeta'
@@ -42,6 +43,13 @@ export function coversDir(): string {
 function sendProgress(sender: WebContents | null, evt: ImportProgressEvent): void {
   try { sender?.send(IPC.EventImportProgress, evt) } catch { /* 窗口可能已关闭 */ }
 }
+
+/** 应用退出标志：导入循环据此中止，避免中途被杀留下脏数据 */
+let quitRequested = false
+export function requestQuitImports(): void { quitRequested = true }
+
+/** 导入防重入锁：并发导入会让同一文件绕过 hash 去重检查、重复入库 */
+let importing = false
 
 /** 文件指纹：大小 + 首部 64KB 哈希，用于去重 */
 function fileHash(filePath: string, size: number): string {
@@ -96,7 +104,6 @@ async function importOne(
     contentIndexed = !!contentText
   } else if (format === 'pdf') {
     const r = await parsePdfFile(filePath, (page, numPages) => {
-      // 全书文本提取可能耗时较长，逐页回报进度
       sendProgress(sender, { current: page, total: numPages, path: filePath, stage: 'pdf-text' })
     })
     ;({ title, author } = r.meta)
@@ -110,52 +117,75 @@ async function importOne(
     contentIndexed = true
   }
 
-  // 入库
-  const id = insertBook({
-    title: title || path.basename(filePath, ext),
-    author,
-    format,
-    description,
-    publisher,
-    language,
-    year,
-    storedPath: '',
-    sourcePath: filePath,
-    size: stat.size,
-    fileHash: hash,
-    contentIndexed,
-  }).id
-
-  // 复制原件到书库目录（数据库独立于源文件位置）
+  // 先落盘再入库：失败时清理临时文件，不留下脏数据
+  const id = randomUUID()
   const storedPath = path.join(libraryDir(), `${id}${ext}`)
-  await fsp.copyFile(filePath, storedPath)
-
-  // 保存封面
   let coverPath = ''
-  if (cover) {
-    const extMap: Record<string, string> = {
-      'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
-    }
-    coverPath = path.join(coversDir(), id + (extMap[cover.mime] ?? '.jpg'))
-    await fsp.writeFile(coverPath, cover.bytes)
-  }
+  try {
+    await fsp.copyFile(filePath, storedPath)
 
-  getDb().prepare('UPDATE books SET stored_path = ?, cover_path = ? WHERE id = ?')
-    .run(storedPath, coverPath, id)
-  if (contentText) {
-    // 重建包含正文的全文索引
-    getDb().prepare('DELETE FROM books_fts WHERE book_id = ?').run(id)
-    getDb().prepare('INSERT INTO books_fts (book_id, title, author, content) VALUES (?, ?, ?, ?)')
-      .run(id, cjkSpace(title), cjkSpace(author), cjkSpace(contentText.slice(0, CONTENT_TEXT_CAP)))
+    if (cover) {
+      const extMap: Record<string, string> = {
+        'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+        'image/webp': '.webp', 'image/svg+xml': '.svg',
+      }
+      coverPath = path.join(coversDir(), id + (extMap[cover.mime] ?? '.jpg'))
+      await fsp.writeFile(coverPath, cover.bytes)
+    }
+
+    insertBook({
+      id,
+      title: title || path.basename(filePath, ext),
+      author,
+      format,
+      description,
+      publisher,
+      language,
+      year,
+      storedPath,
+      coverPath,
+      sourcePath: filePath,
+      size: stat.size,
+      fileHash: hash,
+      contentIndexed,
+    })
+
+    if (contentText) {
+      getDb().prepare('DELETE FROM books_fts WHERE book_id = ?').run(id)
+      getDb().prepare('INSERT INTO books_fts (book_id, title, author, content) VALUES (?, ?, ?, ?)')
+        .run(id, cjkSpace(title), cjkSpace(author), cjkSpace(contentText.slice(0, CONTENT_TEXT_CAP)))
+    }
+  } catch (e) {
+    // 回滚：删除已落盘的文件
+    try { await fsp.unlink(storedPath) } catch { /* ignore */ }
+    if (coverPath) { try { await fsp.unlink(coverPath) } catch { /* ignore */ } }
+    throw e
   }
 
   return 'imported'
 }
 
 export async function importFiles(paths: string[], sender: WebContents | null): Promise<ImportOutcome> {
+  if (importing) {
+    log.warn('已有导入任务在进行中，忽略重复请求')
+    return { imported: 0, skipped: 0, failed: [] }
+  }
+  importing = true
+  try {
+    return await runImport(paths, sender)
+  } finally {
+    importing = false
+  }
+}
+
+async function runImport(paths: string[], sender: WebContents | null): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { imported: 0, skipped: 0, failed: [] }
   const total = paths.length
   for (let i = 0; i < paths.length; i++) {
+    if (quitRequested) {
+      log.info('应用退出，导入中止')
+      break
+    }
     const p = paths[i]
     try {
       const r = await importOne(p, sender, i + 1, total)
@@ -297,8 +327,19 @@ export async function getEpubResource(
   bookId: string,
   resPath: string,
 ): Promise<{ mime: string; bytes: ArrayBuffer } | null> {
-  const s = sessions.get(bookId)
-  if (!s?.zip) return null
+  // 会话可能已被 LRU 驱逐，此时按 bookId 重建，避免图片/样式裂图
+  let s = sessions.get(bookId)
+  if (!s?.zip) {
+    const book = getBook(bookId)
+    if (!book || book.format !== 'epub') return null
+    try {
+      s = await getSession(book)
+    } catch (e) {
+      log.warn(`重建 EPUB 会话失败: ${bookId}`, e)
+      return null
+    }
+  }
+  if (!s.zip) return null
   const entry = s.zip.file(resPath) ?? s.zip.file(decodeURIComponent(resPath))
   if (!entry) return null
   const name = resPath.toLowerCase()

@@ -30,6 +30,7 @@ const pdfjsAny = pdfjsLib as unknown as {
     cMapUrl?: string
     cMapPacked?: boolean
     standardFontDataUrl?: string
+    isEvalSupported?: boolean
   }): { promise: Promise<PDFDocumentProxy> }
   renderTextLayer(params: {
     textContentSource: ReadableStream<unknown> | unknown
@@ -81,6 +82,8 @@ class PdfEngine implements ReaderEngine {
       cMapUrl: './cmaps/',
       cMapPacked: true,
       standardFontDataUrl: './standard_fonts/',
+      // 关闭字体 eval 路径，规避 CVE-2024-4367（渲染不可信 PDF）
+      isEvalSupported: false,
     }).promise
 
     // 用第一页尺寸估算占位高度
@@ -370,17 +373,17 @@ class PdfEngine implements ReaderEngine {
     })
   }
 
-  async goChapter(index: number): Promise<void> {
+  async goChapter(index: number, ratio = 0): Promise<void> {
     const page = index + 1
-    await this.goPage(page)
+    await this.goPage(page, ratio)
   }
 
-  private async goPage(page: number): Promise<void> {
+  private async goPage(page: number, ratio = 0): Promise<void> {
     if (!this.doc) return
     const p = Math.max(1, Math.min(page, this.doc.numPages))
     const slot = this.slots[p - 1]
     if (slot) {
-      this.scroller.scrollTop = slot.el.offsetTop - 8
+      this.scroller.scrollTop = slot.el.offsetTop - 8 + ratio * slot.el.offsetHeight
       await this.renderVisible()
     }
   }
@@ -413,6 +416,14 @@ class PdfEngine implements ReaderEngine {
 
   clearSelection(): void {
     try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ }
+  }
+
+  focusAnnotation(annId: string): void {
+    const mark = this.scroller?.querySelector(`.pdf-hl[data-ann="${annId}"]`) as HTMLElement | null
+    if (!mark) return
+    mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    mark.classList.add('flash')
+    setTimeout(() => mark.classList.remove('flash'), 1200)
   }
 
   tocEntries(): TocEntry[] {
