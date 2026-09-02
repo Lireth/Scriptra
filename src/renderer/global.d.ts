@@ -37,6 +37,7 @@ export interface ScriptraApi {
   getSettings(): Promise<{ scanFolders: string[] }>
   setSettings(patch: unknown): Promise<unknown>
   log(level: 'info' | 'warn' | 'error', message: string): Promise<boolean>
+  openExternal(url: string): Promise<boolean>
 
   onImportProgress(handler: (payload: {
     current: number; total: number; path: string; stage: string

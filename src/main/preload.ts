@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('scriptra', {
   setSettings: (patch: unknown) => invoke(IPC.SettingsSet, patch),
   log: (level: 'info' | 'warn' | 'error', message: string) =>
     invoke(IPC.LogRenderer, level, String(message)),
+  openExternal: (url: string) => invoke(IPC.ShellOpenExternal, url),
 
   /** 监听导入进度事件，返回取消监听函数 */
   onImportProgress: (handler: (payload: unknown) => void): (() => void) => {

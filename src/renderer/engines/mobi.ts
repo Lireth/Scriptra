@@ -166,9 +166,16 @@ class MobiEngine implements ReaderEngine {
 
   private wrapDoc(doc: Document): string {
     const t = this.style
+    // 收集 head 中的原书样式（KF8 转换产物通常内联于各节 head；
+    // body 内的 <style> 已随 innerHTML 序列化，跳过避免重复注入）
+    const bookCss = [...doc.querySelectorAll('style')]
+      .filter((st) => !doc.body?.contains(st))
+      .map((st) => st.textContent || '')
+      .join('\n')
     const theme = { light: { bg: '#fbfaf7', fg: '#2c2a25' }, sepia: { bg: '#f4ecd8', fg: '#5b4636' }, green: { bg: '#cfe6d0', fg: '#22382a' }, dark: { bg: '#232529', fg: '#c8c4bc' } }[t.theme]
       ?? { bg: '#fbfaf7', fg: '#2c2a25' }
     const css = `
+      ${bookCss}
       body { background:${theme.bg}; color:${theme.fg}; font-family:${t.fontFamily};
         font-size:${t.fontSize}px; line-height:${t.lineHeight}; max-width:${t.pageWidth}px;
         margin:0 auto; padding:24px 20px 45vh; word-wrap:break-word; }
@@ -238,6 +245,11 @@ class MobiEngine implements ReaderEngine {
       if (link) {
         e.preventDefault()
         const href = link.getAttribute('href') || ''
+        // 书内外链交由系统浏览器打开（主进程白名单校验 http/https）
+        if (/^https?:\/\//i.test(href)) {
+          void window.scriptra.openExternal(href)
+          return
+        }
         if (href.startsWith('filepos:')) {
           try {
             const loc = this.book!.resolveHref(href)

@@ -371,6 +371,11 @@ export abstract class DocEngine implements ReaderEngine {
 
   protected handleLink(href: string): void {
     if (!href) return
+    // 书内外链交由系统浏览器打开（主进程白名单校验 http/https）
+    if (/^https?:\/\//i.test(href)) {
+      void window.scriptra.openExternal(href)
+      return
+    }
     if (href.startsWith('#')) {
       const target = this.idoc?.getElementById(href.slice(1))
       if (target) target.scrollIntoView({ block: 'start' })

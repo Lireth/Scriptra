@@ -4,7 +4,7 @@
  * 所有跨进程调用集中在此注册，统一错误记录。
  */
 
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import {
   IPC, type Annotation, type BookQuery, type BookUpdatePatch, type ImportOutcome,
 } from '../../shared/types'
@@ -182,6 +182,16 @@ export function registerIpcHandlers(): void {
     if (lv === 'error') log.renderer.error(msg)
     else if (lv === 'warn') log.renderer.warn(msg)
     else log.renderer.info(msg)
+    return true
+  })
+
+  /* ------------------------------ 外部链接 ------------------------------ */
+
+  handle(IPC.ShellOpenExternal, (_e, url: string) => {
+    const u = str(url, 2048)
+    // 仅放行 http/https，防止渲染进程借道打开 file: /自定义协议
+    if (/^https?:\/\//i.test(u)) void shell.openExternal(u)
+    else log.warn(`已拦截非法外链请求: ${u}`)
     return true
   })
 }

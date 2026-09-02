@@ -176,6 +176,8 @@ export const IPC = {
   SettingsGet: 'settings:get',
   SettingsSet: 'settings:set',
   LogRenderer: 'log:renderer',
+  /** 书内外部链接交由系统浏览器打开（主进程白名单校验） */
+  ShellOpenExternal: 'shell:open-external',
   EventImportProgress: 'library:progress',
   /** 文件关联 / 第二实例传入的电子书路径，主进程 -> 渲染进程 */
   EventImportRequest: 'library:import-request',
