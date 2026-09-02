@@ -446,6 +446,8 @@ export class LibraryView {
           await this.refresh()
         }),
       })),
+      { label: '导出批注（Markdown）…', separatorBefore: true, action: () => void this.exportBookAnnotations(book) },
+      { label: '导入批注备份…', action: () => void this.importAnnotationBackup() },
       { label: '删除书籍…', separatorBefore: true, danger: true, action: () => void this.removeBook(book) },
     ]
     openContextMenu(x, y, items)
@@ -540,6 +542,33 @@ export class LibraryView {
       await window.scriptra.removeBooks([book.id])
       await this.refresh()
     }, () => '已删除')
+  }
+
+  private async exportBookAnnotations(book: Book): Promise<void> {
+    try {
+      const r = await window.scriptra.exportAnnotations(book.id, 'md')
+      if (r.path) toast(`已导出：${r.path}`, 'success', 5000)
+    } catch (e) {
+      toast(`导出失败：${e instanceof Error ? e.message : String(e)}`, 'error')
+    }
+  }
+
+  private async importAnnotationBackup(): Promise<void> {
+    try {
+      const r = await window.scriptra.importAnnotations()
+      if (!r) return
+      if (!r.restored && !r.skipped && !r.unknownBooks) {
+        toast('备份文件中没有可导入的批注', 'warn')
+        return
+      }
+      const parts = [`恢复 ${r.restored}`]
+      if (r.skipped) parts.push(`跳过重复/非法 ${r.skipped}`)
+      if (r.unknownBooks) parts.push(`书籍已不存在 ${r.unknownBooks}`)
+      toast(`批注导入完成：${parts.join('，')}`, r.restored ? 'success' : 'warn', 5000)
+      if (r.restored) await this.refresh()
+    } catch (e) {
+      toast(`导入失败：${e instanceof Error ? e.message : String(e)}`, 'error')
+    }
   }
 
   openSelected(): void {

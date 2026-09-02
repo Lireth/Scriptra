@@ -13,6 +13,9 @@ import {
   addAnnotation, listAnnotations, removeAnnotation, updateAnnotation,
 } from '../db/annotations'
 import {
+  exportAnnotations, importAnnotations,
+} from '../services/annotationsBackup'
+import {
   getBook, indexBookText, lastReadBook, libraryStats, listBooks, setBookProgress, updateBook,
 } from '../db/books'
 import {
@@ -171,6 +174,11 @@ export function registerIpcHandlers(): void {
     removeAnnotation(str(id, 64))
     return true
   })
+
+  handle(IPC.AnnExport, async (event, bookId: string, format: unknown) =>
+    exportAnnotations(str(bookId, 64), oneOf(format, ['md', 'json'] as const, 'md'), senderWindow(event)))
+
+  handle(IPC.AnnImport, async (event) => importAnnotations(senderWindow(event)))
 
   /* ------------------------------ 设置与日志 ------------------------------ */
 

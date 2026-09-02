@@ -620,6 +620,19 @@ mark.scriptra-search.current { outline: 2px solid #e07b39; background: rgba(255,
 .textLayer.has-search-marks { opacity: 1; }
 .search-hit.active { background: var(--accent-soft); }
 
+/* 批注面板标题行（标题 + 导出按钮） */
+.ann-panel-title { display: flex; align-items: center; justify-content: space-between; }
+.ann-export-btn {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.ann-export-btn:hover { background: var(--accent-soft); }
+
 /* ============================================================
    PDF 阅读器
    ============================================================ */

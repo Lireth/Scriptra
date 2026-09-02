@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('scriptra', {
   addAnnotation: (data: unknown) => invoke(IPC.AnnAdd, data),
   updateAnnotation: (id: string, patch: unknown) => invoke(IPC.AnnUpdate, id, patch),
   removeAnnotation: (id: string) => invoke(IPC.AnnRemove, id),
+  exportAnnotations: (bookId: string, format: 'md' | 'json') => invoke(IPC.AnnExport, bookId, format),
+  importAnnotations: () => invoke(IPC.AnnImport),
 
   /* ------------------------------ 设置与日志 ------------------------------ */
   getSettings: () => invoke(IPC.SettingsGet),

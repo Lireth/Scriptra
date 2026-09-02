@@ -81,3 +81,36 @@ export function updateAnnotation(
 export function removeAnnotation(id: string): void {
   getDb().prepare('DELETE FROM annotations WHERE id = ?').run(id)
 }
+
+export function getAnnotation(id: string): Annotation | null {
+  const row = getDb().prepare('SELECT * FROM annotations WHERE id = ?').get(id) as AnnRow | undefined
+  return row ? rowToAnn(row) : null
+}
+
+export interface ImportAnnotation {
+  /** 缺省时生成新 id */
+  id?: string
+  bookId: string
+  type: AnnotationType
+  color?: string
+  text?: string
+  note?: string
+  locator: AnnotationLocator
+  createdAt?: number
+  updatedAt?: number
+}
+
+/** 备份恢复插入：按 id 去重，返回是否新增 */
+export function importAnnotation(a: ImportAnnotation): 'imported' | 'skipped' {
+  const id = a.id ?? randomUUID()
+  if (getAnnotation(id)) return 'skipped'
+  const now = Date.now()
+  const createdAt = typeof a.createdAt === 'number' && a.createdAt > 0 ? Math.trunc(a.createdAt) : now
+  const updatedAt = typeof a.updatedAt === 'number' && a.updatedAt > 0 ? Math.trunc(a.updatedAt) : createdAt
+  getDb().prepare(`
+    INSERT INTO annotations (id, book_id, type, color, text, note, locator, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, a.bookId, a.type, a.color ?? '', a.text ?? '', a.note ?? '',
+    JSON.stringify(a.locator), createdAt, updatedAt)
+  return 'imported'
+}

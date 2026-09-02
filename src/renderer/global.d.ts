@@ -33,6 +33,8 @@ export interface ScriptraApi {
   addAnnotation(data: Omit<Annotation, 'id' | 'createdAt' | 'updatedAt'>): Promise<Annotation>
   updateAnnotation(id: string, patch: { color?: string; note?: string }): Promise<Annotation | null>
   removeAnnotation(id: string): Promise<boolean>
+  exportAnnotations(bookId: string, format: 'md' | 'json'): Promise<{ path: string | null }>
+  importAnnotations(): Promise<{ restored: number; skipped: number; unknownBooks: number } | null>
 
   getSettings(): Promise<{ scanFolders: string[] }>
   setSettings(patch: unknown): Promise<unknown>

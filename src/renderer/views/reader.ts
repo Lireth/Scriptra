@@ -12,6 +12,7 @@ import {
 } from '../engines/types'
 import { toast, withToast } from '../components/toast'
 import { confirmDialog } from '../components/dialogs'
+import { openContextMenu } from '../components/contextMenu'
 
 const FONT_OPTIONS = [
   { label: '系统默认', value: "'Segoe UI', '微软雅黑', 'Microsoft YaHei', sans-serif" },
@@ -390,7 +391,22 @@ export class ReaderView {
     const panel = document.getElementById('reader-panel')
     if (!panel) return
     panel.innerHTML = ''
-    panel.appendChild(el('div', 'panel-title', `批注（${this.annotations.length}）`))
+    const titleRow = el('div', 'panel-title ann-panel-title')
+    titleRow.appendChild(el('span', '', `批注（${this.annotations.length}）`))
+    if (this.annotations.length && this.book) {
+      const exportBtn = el('button', 'ann-export-btn', '导出')
+      exportBtn.title = '导出批注'
+      exportBtn.onclick = (e) => {
+        e.stopPropagation()
+        const rect = (e.target as HTMLElement).getBoundingClientRect()
+        openContextMenu(rect.left, rect.bottom + 4, [
+          { label: 'Markdown 文档…', action: () => void this.exportAnnotations('md') },
+          { label: 'JSON 备份…', action: () => void this.exportAnnotations('json') },
+        ])
+      }
+      titleRow.appendChild(exportBtn)
+    }
+    panel.appendChild(titleRow)
     const list = el('div', 'panel-list')
     if (!this.annotations.length) {
       list.appendChild(el('div', 'filter-empty', '划选正文即可添加高亮或笔记'))
@@ -615,6 +631,18 @@ export class ReaderView {
       this.annotations.push(ann)
       this.renderAnnPanel()
     }, () => '已添加书签')
+  }
+
+  /** 导出当前书籍批注（MD 可读文档 / JSON 结构化备份） */
+  private async exportAnnotations(format: 'md' | 'json'): Promise<void> {
+    if (!this.book) return
+    try {
+      const r = await window.scriptra.exportAnnotations(this.book.id, format)
+      if (r.path) toast(`已导出：${r.path}`, 'success', 5000)
+    } catch (e) {
+      toast(`导出失败：${e instanceof Error ? e.message : String(e)}`, 'error')
+      window.scriptra.log('error', `批注导出失败: ${e instanceof Error ? e.stack : String(e)}`)
+    }
   }
 
   /* ------------------------------ 书内搜索 ------------------------------ */

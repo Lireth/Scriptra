@@ -148,6 +148,16 @@ export interface ImportProgressEvent {
   stage: 'scan' | 'import' | 'pdf-text'
 }
 
+/** 批注备份导入结果 */
+export interface AnnotationImportResult {
+  /** 新恢复条数 */
+  restored: number
+  /** 与现有批注 id 重复或数据非法被跳过条数 */
+  skipped: number
+  /** 备份中对应书籍已不存在被跳过条数 */
+  unknownBooks: number
+}
+
 /* ------------------------------ IPC 通道名 ------------------------------ */
 
 export const IPC = {
@@ -173,6 +183,8 @@ export const IPC = {
   AnnAdd: 'ann:add',
   AnnUpdate: 'ann:update',
   AnnRemove: 'ann:remove',
+  AnnExport: 'ann:export',
+  AnnImport: 'ann:import',
   SettingsGet: 'settings:get',
   SettingsSet: 'settings:set',
   LogRenderer: 'log:renderer',
