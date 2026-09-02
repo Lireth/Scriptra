@@ -65,11 +65,12 @@ export class ReaderView {
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private selection: SelectionInfo | null = null
   private popup: HTMLElement | null = null
-  private containerRectDirty = true
 
   constructor(root: HTMLElement) {
     this.root = root
     this.build()
+    // 窗口尺寸变化（最大化 / 还原 / 拖拽边框）时通知阅读引擎重排
+    window.addEventListener('resize', () => this.engine?.onResize?.())
   }
 
   /* ------------------------------ DOM ------------------------------ */
@@ -158,7 +159,6 @@ export class ReaderView {
     this.root.classList.remove('hidden')
     const container = document.getElementById('reader-container')!
     container.innerHTML = ''
-    this.containerRectDirty = true
 
     const title = document.getElementById('reader-title')!
     title.textContent = `${book.title}${book.author ? ' · ' + book.author : ''}`

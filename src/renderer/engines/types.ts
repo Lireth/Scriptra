@@ -50,6 +50,8 @@ export interface ReaderEngine {
   nextChapter(): Promise<boolean>
   prevChapter(): Promise<boolean>
   destroy(): void
+  /** 窗口尺寸变化（含最大化/还原）时触发，引擎按需重排 */
+  onResize?(): void
 }
 
 const ENGINES_KEY = '__scriptraEngines'

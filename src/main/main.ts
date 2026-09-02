@@ -151,6 +151,12 @@ function createMainWindow(): void {
 // Windows 任务栏通知分组标识
 app.setAppUserModelId('com.scriptra.desktop')
 
+// 禁用硬件加速：
+// 实测 Windows 下最大化窗口会触发 GPU 进程崩溃（exit_code=34），
+// 崩溃后合成器停止更新，整个界面冻结在旧尺寸（右侧留白）。
+// 阅读器以文本渲染为主，软件渲染完全够用，可彻底规避该类 GPU 驱动问题。
+app.disableHardwareAcceleration()
+
 // 未捕获异常与 Promise 拒绝记录日志，避免静默失败
 process.on('uncaughtException', (err) => {
   log.error('主进程未捕获异常:', err)

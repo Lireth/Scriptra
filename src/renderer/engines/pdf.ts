@@ -60,6 +60,8 @@ class PdfEngine implements ReaderEngine {
   private onScrollHandler: (() => void) | null = null
   private mouseUpHandler: (() => void) | null = null
   private clickHandler: ((e: MouseEvent) => void) | null = null
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null
+  private lastLayoutWidth = 0
 
   async open(
     container: HTMLElement,
@@ -131,6 +133,7 @@ class PdfEngine implements ReaderEngine {
     // 恢复进度
     const detail = payload.progressDetail
     const startPage = detail && detail.kind === 'pdf' ? Math.max(1, Math.min(detail.page, n)) : 1
+    this.lastLayoutWidth = this.pageWidthPx()
     await this.renderVisible()
     if (startPage > 1) {
       const slot = this.slots[startPage - 1]
@@ -143,6 +146,46 @@ class PdfEngine implements ReaderEngine {
 
   private pageWidthPx(): number {
     return Math.max(320, this.scroller.clientWidth - 32)
+  }
+
+  /**
+   * 窗口尺寸变化（最大化 / 还原 / 拖拽边框）后重排：
+   * 按新宽度更新所有页面占位尺寸，重渲染可视页，并保持当前阅读位置
+   */
+  onResize(): void {
+    if (this.destroyed || !this.doc) return
+    if (this.resizeTimer) clearTimeout(this.resizeTimer)
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = null
+      this.relayout()
+    }, 120)
+  }
+
+  private relayout(): void {
+    if (this.destroyed || !this.doc || !this.slots.length) return
+    const w = this.pageWidthPx()
+    if (w === this.lastLayoutWidth) return
+    this.lastLayoutWidth = w
+
+    // 记录当前阅读位置（页码 + 页内比例），重排后恢复
+    const curSlot = this.slots[this.current - 1]
+    let ratio = 0
+    if (curSlot && curSlot.el.offsetHeight > 0) {
+      ratio = clamp((this.scroller.scrollTop - curSlot.el.offsetTop) / curSlot.el.offsetHeight, 0, 1)
+    }
+
+    const placeholderH = `${(w * this.firstPageAspect).toFixed(1)}px`
+    for (const slot of this.slots) {
+      slot.el.style.width = `${w}px`
+      slot.el.style.height = placeholderH
+    }
+
+    this.renderVisible()
+
+    if (curSlot) {
+      this.scroller.scrollTop = curSlot.el.offsetTop + ratio * curSlot.el.offsetHeight
+    }
+    this.reportProgress()
   }
 
   /** 渲染可视页与相邻页 */
@@ -223,16 +266,16 @@ class PdfEngine implements ReaderEngine {
       slot.renderTask = task
       await task.promise
 
-      // 文本层（选择 / 复制）
+      // 文本层（选择 / 复制）：使用 CSS 尺寸视口，避免 dpr 放大导致文本层超出页面产生横向滚动
       const textEl = document.createElement('div')
       textEl.className = 'textLayer'
-      textEl.style.setProperty('--scale-factor', String(scale * dpr))
+      textEl.style.setProperty('--scale-factor', String(scale))
       slot.canvasBox.appendChild(textEl)
       const tc = await page.streamTextContent()
       const tlTask = pdfjsAny.renderTextLayer({
         textContentSource: tc,
         container: textEl,
-        viewport,
+        viewport: page.getViewport({ scale }),
       })
       slot.renderTask = tlTask
       await tlTask.promise
@@ -376,6 +419,10 @@ class PdfEngine implements ReaderEngine {
 
   destroy(): void {
     this.destroyed = true
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer)
+      this.resizeTimer = null
+    }
     if (this.onScrollHandler) this.scroller?.removeEventListener('scroll', this.onScrollHandler)
     if (this.mouseUpHandler) this.scroller?.removeEventListener('mouseup', this.mouseUpHandler)
     if (this.clickHandler) this.scroller?.removeEventListener('click', this.clickHandler)

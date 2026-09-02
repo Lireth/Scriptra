@@ -563,6 +563,8 @@ select.form-input { padding: 6px 8px; }
    ============================================================ */
 
 .pdf-reader {
+  height: 100%;
+  overflow: auto;
   padding: 14px 16px 40vh;
   transition: background .2s;
 }
