@@ -195,6 +195,7 @@ export function showHelpDialog(): void {
     ['Ctrl + O', '导入电子书文件'],
     ['Ctrl + Shift + O', '扫描文件夹'],
     ['Ctrl + F', '聚焦搜索框'],
+    ['↑ ↓ ← →', '在书库中移动选中'],
     ['Enter', '打开选中的书'],
     ['Delete', '删除选中的书'],
     ['F1', '快捷键帮助'],

@@ -366,6 +366,37 @@ export class LibraryView {
     for (const book of this.books) {
       container.appendChild(this.buildCard(book))
     }
+    // roving tabindex：选中卡可 Tab 到达；无选中时首卡可到达
+    if (this.selectedId && this.books.some((b) => b.id === this.selectedId)) {
+      this.selectBook(this.selectedId)
+    } else {
+      const first = container.querySelector<HTMLElement>('.book-card')
+      if (first) first.tabIndex = 0
+    }
+  }
+
+  /** 选中书籍并同步 roving tabindex（focus=true 时移动焦点并滚动到可见） */
+  private selectBook(id: string, focus = false): void {
+    this.selectedId = id
+    document.querySelectorAll<HTMLElement>('.book-card').forEach((c) => {
+      const active = c.dataset.id === id
+      c.classList.toggle('selected', active)
+      c.tabIndex = active ? 0 : -1
+      if (active && focus) {
+        c.focus({ preventScroll: true })
+        c.scrollIntoView({ block: 'nearest' })
+      }
+    })
+  }
+
+  /** ↑↓←→ 键盘导航：无选中落到首/末项，有选中移动到相邻项 */
+  moveSelection(dir: 1 | -1): void {
+    if (!this.books.length) return
+    const idx = this.books.findIndex((b) => b.id === this.selectedId)
+    const next = idx < 0
+      ? this.books[dir > 0 ? 0 : this.books.length - 1]
+      : this.books[Math.max(0, Math.min(this.books.length - 1, idx + dir))]
+    this.selectBook(next.id, true)
   }
 
   private buildCard(book: Book): HTMLElement {
@@ -410,15 +441,28 @@ export class LibraryView {
       `${book.category} · ${formatSize(book.size)} · 阅读进度 ${Math.round(book.progress * 100)}%`)
     card.appendChild(listMeta)
 
-    card.onclick = () => {
-      this.selectedId = book.id
-      document.querySelectorAll('.book-card.selected').forEach((c) => c.classList.remove('selected'))
-      card.classList.add('selected')
+    // 可达性：卡片可聚焦、可由屏幕阅读器朗读
+    card.tabIndex = -1
+    card.setAttribute('role', 'button')
+    card.setAttribute('aria-label',
+      `${book.title}，${book.author || '佚名'}，${STATUS_LABEL[book.status]}，进度 ${Math.round(book.progress * 100)}%`)
+    // 方向键在卡片上移动选中（全局按键兜底处理无焦点场景）
+    card.onkeydown = (e) => {
+      const dirs: Record<string, 1 | -1> = {
+        ArrowDown: 1, ArrowUp: -1, ArrowRight: 1, ArrowLeft: -1,
+      }
+      const dir = dirs[e.key]
+      if (dir) {
+        e.preventDefault()
+        this.moveSelection(dir)
+      }
     }
+
+    card.onclick = () => this.selectBook(book.id)
     card.ondblclick = () => this.onOpenBook(book)
     card.oncontextmenu = (e) => {
       e.preventDefault()
-      this.selectedId = book.id
+      this.selectBook(book.id)
       this.showContextMenu(e.clientX, e.clientY, book)
     }
 

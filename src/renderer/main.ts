@@ -70,6 +70,13 @@ document.addEventListener('keydown', (e) => {
     libraryView.focusSearch()
     return
   }
+  if (!typing && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    // 书库方向键导航（卡片有焦点时由卡片自身处理，此处兜底无焦点场景）
+    e.preventDefault()
+    const dir = (e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : -1
+    libraryView.moveSelection(dir)
+    return
+  }
   if (!typing && e.key === 'Enter') {
     libraryView.openSelected()
     return
