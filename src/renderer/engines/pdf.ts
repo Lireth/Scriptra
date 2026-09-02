@@ -198,8 +198,10 @@ class PdfEngine implements ReaderEngine {
     let current = 1
     for (const slot of this.slots) {
       const top = slot.el.offsetTop
-      const bottom = top + slot.el.offsetHeight
-      if (bottom < viewTop + this.scroller.clientHeight * 0.35) current = slot.page
+      // 取"顶部参考线（视口 35% 处）落在哪一页"作为当前页。
+      // 若按页底判定，PDF 页高约为视口的 2.4 倍，页码会滞后实际阅读位置 1~2 页，
+      // 且恢复进度时 top 被钳制到 1，导致开关书后进度逐渐漂移。
+      if (top <= viewTop + this.scroller.clientHeight * 0.35) current = slot.page
     }
     if (current !== this.current) {
       this.current = current

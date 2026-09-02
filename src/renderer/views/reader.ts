@@ -227,11 +227,12 @@ export class ReaderView {
   }
 
   private closeEngine(): void {
+    // 先落盘待保存的进度，再清空 book（flushSaveProgress 依赖 this.book）
+    this.flushSaveProgress()
     if (this.book) void window.scriptra.closeBook(this.book.id)
     this.engine?.destroy()
     this.engine = null
     this.book = null
-    this.flushSaveProgress()
   }
 
   /* ------------------------------ 进度 ------------------------------ */
