@@ -183,7 +183,7 @@ export function listBooks(query: BookQuery): Book[] {
   const sql = `
     SELECT b.* FROM books b ${joins}
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY ${orderBy}
+    ORDER BY ${orderBy}, b.id
     LIMIT ${limit} OFFSET ${offset}
   `
   try {

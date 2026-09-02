@@ -415,8 +415,7 @@ export class ReaderView {
     for (const ann of sorted) {
       const row = el('div', 'ann-item')
       const head = el('div', 'ann-head')
-      const badge = el('span',
-        `ann-badge ann-${ann.type}${ann.type === 'highlight' ? '' : ''}`)
+      const badge = el('span', `ann-badge ann-${ann.type}`)
       badge.textContent = ann.type === 'bookmark' ? '书签' : ann.type === 'note' ? '笔记' : '高亮'
       if (ann.type === 'highlight') badge.style.background = ann.color || '#ffd54d'
       head.appendChild(badge)
@@ -495,9 +494,6 @@ export class ReaderView {
       sel.appendChild(opt)
     }
     sel.value = String(this.currentChapter)
-    for (const item of items) {
-      void item
-    }
   }
 
   /* ------------------------------ 排版设置 ------------------------------ */

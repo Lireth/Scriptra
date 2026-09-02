@@ -175,7 +175,6 @@ export const IPC = {
   LibraryCancelImport: 'library:cancel-import',
   BookOpen: 'book:open',
   BookClose: 'book:close',
-  BookGetFile: 'book:get-file',
   BookGetResource: 'book:get-resource',
   BookSetProgress: 'book:set-progress',
   BookIndexText: 'book:index-text',

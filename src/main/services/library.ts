@@ -417,9 +417,3 @@ const MAX_EPUB_RESOURCE_BYTES = 32 * 1024 * 1024
 function safeDecodePath(p: string): string {
   try { return decodeURIComponent(p) } catch { return p }
 }
-
-export function getFileBuffer(bookId: string): ArrayBuffer | null {
-  const s = sessions.get(bookId)
-  if (!s) return null
-  return s.buffer.buffer.slice(s.buffer.byteOffset, s.buffer.byteOffset + s.buffer.byteLength) as ArrayBuffer
-}
