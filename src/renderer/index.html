@@ -7,56 +7,16 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <header class="app-header">
-    <div class="brand">
-      <span class="brand-logo">笺</span>
-      <div class="brand-text">
-        <h1>Scriptra</h1>
-        <p>观笺 · Windows 桌面应用</p>
-      </div>
-    </div>
-    <span id="app-version" class="version-badge"></span>
-  </header>
+  <div id="app">
+    <!-- 书库视图 -->
+    <div id="view-library" class="view library-view"></div>
 
-  <main class="app-main">
-    <section class="hero">
-      <h2>欢迎使用观笺</h2>
-      <p>Electron 项目模板已就绪。当前运行环境信息如下：</p>
-    </section>
+    <!-- 阅读视图 -->
+    <div id="view-reader" class="view reader-view hidden"></div>
+  </div>
 
-    <section class="info-grid">
-      <div class="info-card">
-        <span class="info-label">Electron</span>
-        <span class="info-value" id="info-electron">-</span>
-      </div>
-      <div class="info-card">
-        <span class="info-label">Chromium</span>
-        <span class="info-value" id="info-chromium">-</span>
-      </div>
-      <div class="info-card">
-        <span class="info-label">Node.js</span>
-        <span class="info-value" id="info-node">-</span>
-      </div>
-      <div class="info-card">
-        <span class="info-label">运行平台</span>
-        <span class="info-value" id="info-platform">-</span>
-      </div>
-    </section>
-
-    <section class="next-steps">
-      <h3>下一步</h3>
-      <ul>
-        <li>主进程入口：<code>src/main/main.js</code></li>
-        <li>安全桥接脚本：<code>src/main/preload.js</code></li>
-        <li>渲染进程页面：<code>src/renderer/index.html</code></li>
-        <li>开发运行：<code>npm run dev</code>；打包：<code>npm run build:win</code></li>
-      </ul>
-    </section>
-  </main>
-
-  <footer class="app-footer">
-    <span>Scriptra Template v0.1.0 · Electron + electron-builder</span>
-  </footer>
+  <div id="toast-container"></div>
+  <div id="overlay-root"></div>
 
   <script src="./renderer.js"></script>
 </body>
