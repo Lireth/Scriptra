@@ -177,6 +177,8 @@ export const IPC = {
   SettingsSet: 'settings:set',
   LogRenderer: 'log:renderer',
   EventImportProgress: 'library:progress',
+  /** 文件关联 / 第二实例传入的电子书路径，主进程 -> 渲染进程 */
+  EventImportRequest: 'library:import-request',
 } as const
 
 export const HIGHLIGHT_COLORS = ['#ffd54d', '#9ae6b4', '#90cdf4', '#f6a6c1', '#d6bcfa']

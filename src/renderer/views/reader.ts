@@ -5,7 +5,7 @@
 import {
   HIGHLIGHT_COLORS, type Annotation, type Book, type ReaderStyle, type ThemeName,
 } from '../../shared/types'
-import { clamp, el, formatTime } from '../util'
+import { clamp, debounce, el, formatTime } from '../util'
 import {
   loadEngineScript, getEngine,
   type EngineCallbacks, type ReaderEngine, type SelectionInfo, type TocEntry,
@@ -70,6 +70,11 @@ export class ReaderView {
   private progressTrack: HTMLElement | null = null
   private progressFill: HTMLElement | null = null
   private progressLabelEl: HTMLElement | null = null
+  /**
+   * 排版变更防抖：MOBI 需整章重渲染、PDF 曾需全页重绘，
+   * 滑杆每 tick 直调会连续重排造成卡顿；合并为停顿 150ms 后应用一次
+   */
+  private applyStyleDebounced = debounce(() => this.engine?.applyStyle(this.style), 150)
 
   constructor(root: HTMLElement) {
     this.root = root
@@ -521,7 +526,7 @@ export class ReaderView {
 
   private saveStyle(): void {
     localStorage.setItem(STYLE_KEY, JSON.stringify(this.style))
-    this.engine?.applyStyle(this.style)
+    this.applyStyleDebounced()
     this.applyThemeToChrome()
   }
 
@@ -794,10 +799,26 @@ export class ReaderView {
 
     if (e.key === 'ArrowRight' || e.key === 'PageDown') {
       e.preventDefault()
-      void this.engine?.nextChapter()
+      void this.goNext()
     } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
       e.preventDefault()
-      void this.engine?.prevChapter()
+      void this.goPrev()
     }
+  }
+
+  /**
+   * 方向键 / PgDn 前进：阅读型引擎章内滚动一屏，到章节边界再翻章；
+   * PDF（未实现 scrollByScreen）保持整页翻页语义。
+   */
+  private async goNext(): Promise<void> {
+    if (!this.engine) return
+    if (this.engine.scrollByScreen && await this.engine.scrollByScreen(1)) return
+    await this.engine.nextChapter()
+  }
+
+  private async goPrev(): Promise<void> {
+    if (!this.engine) return
+    if (this.engine.scrollByScreen && await this.engine.scrollByScreen(-1)) return
+    await this.engine.prevChapter()
   }
 }

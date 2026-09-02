@@ -5,7 +5,7 @@
  * 所有跨进程调用都走显式方法（无通用 invoke），通道白名单由代码本身保证。
  */
 
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/types'
 
 const invoke = (channel: string, ...args: unknown[]): Promise<unknown> => {
@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('scriptra', {
   /* ------------------------------ 书库 ------------------------------ */
   importFiles: (paths: string[]) => invoke(IPC.LibraryImport, paths),
   scanFolder: (folder: string) => invoke(IPC.LibraryScan, folder),
+  /** 拖拽落下的 File 对象转本地路径（必须在 preload 侧调用 webUtils） */
+  pathForFile: (file: File) => webUtils.getPathForFile(file),
   listBooks: (query: unknown) => invoke(IPC.LibraryList, query),
   getBook: (id: string) => invoke(IPC.LibraryGet, id),
   updateBook: (id: string, patch: unknown) => invoke(IPC.LibraryUpdate, id, patch),
@@ -59,5 +61,14 @@ contextBridge.exposeInMainWorld('scriptra', {
     const listener = (_event: unknown, payload: unknown) => handler(payload)
     ipcRenderer.on(IPC.EventImportProgress, listener as never)
     return () => ipcRenderer.removeListener(IPC.EventImportProgress, listener as never)
+  },
+
+  /** 监听文件关联 / 第二实例触发的导入请求，返回取消监听函数 */
+  onImportRequest: (handler: (paths: string[]) => void): (() => void) => {
+    const listener = (_event: unknown, paths: unknown) => {
+      if (Array.isArray(paths)) handler(paths.filter((x): x is string => typeof x === 'string'))
+    }
+    ipcRenderer.on(IPC.EventImportRequest, listener as never)
+    return () => ipcRenderer.removeListener(IPC.EventImportRequest, listener as never)
   },
 })

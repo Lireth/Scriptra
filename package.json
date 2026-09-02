@@ -55,7 +55,29 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+      "fileAssociations": [
+        {
+          "ext": "epub",
+          "name": "EPUB 电子书",
+          "description": "用 观笺 Scriptra 打开 EPUB 电子书"
+        },
+        {
+          "ext": "pdf",
+          "name": "PDF 文档",
+          "description": "用 观笺 Scriptra 打开 PDF 文档"
+        },
+        {
+          "ext": "mobi",
+          "name": "MOBI 电子书",
+          "description": "用 观笺 Scriptra 打开 MOBI 电子书"
+        },
+        {
+          "ext": "azw",
+          "name": "AZW 电子书",
+          "description": "用 观笺 Scriptra 打开 AZW 电子书"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

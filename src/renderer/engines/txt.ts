@@ -166,6 +166,19 @@ class TxtEngine implements ReaderEngine {
     return true
   }
 
+  async scrollByScreen(dir: 1 | -1): Promise<boolean> {
+    const max = this.scroller.scrollHeight - this.scroller.clientHeight
+    const y = this.scroller.scrollTop
+    if (dir > 0) {
+      if (max - y < 4) return false
+      this.scroller.scrollTop = Math.min(max, y + this.scroller.clientHeight * 0.9)
+      return true
+    }
+    if (y <= 4) return false
+    this.scroller.scrollTop = Math.max(0, y - this.scroller.clientHeight * 0.9)
+    return true
+  }
+
   applyStyle(style: ReaderStyle): void {
     this.style = style
     if (!this.scroller) return

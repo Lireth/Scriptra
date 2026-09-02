@@ -603,6 +603,35 @@ select.form-input { padding: 6px 8px; }
 }
 .textLayer ::selection { background: rgba(90, 140, 220, 0.5); }
 
+/* 扫描按钮组：主按钮 + 最近扫描目录下拉 */
+.scan-wrap { display: flex; }
+.scan-wrap > .btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.scan-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+  padding: 7px 8px;
+  font-size: 11px;
+}
+
+/* PDF 夜间主题：仅反色画布与文本层，高亮叠加层保持原色 */
+.pdf-reader.pdf-dark .pdf-page {
+  background: #2b2d31;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.pdf-reader.pdf-dark .pdf-canvas-box canvas,
+.pdf-reader.pdf-dark .textLayer {
+  filter: invert(0.92) hue-rotate(180deg);
+}
+/* 深色底上 multiply 会吞掉高亮色，改用 screen 提亮 */
+.pdf-reader.pdf-dark .pdf-hl {
+  mix-blend-mode: screen;
+  opacity: 0.55;
+}
+
 /* ============================================================
    弹窗 / 菜单 / 通知
    ============================================================ */

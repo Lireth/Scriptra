@@ -478,6 +478,22 @@ export abstract class DocEngine implements ReaderEngine {
     return true
   }
 
+  async scrollByScreen(dir: 1 | -1): Promise<boolean> {
+    const win = this.iwin
+    const docEl = win.document.documentElement
+    const max = docEl.scrollHeight - win.innerHeight
+    const y = win.scrollY
+    if (dir > 0) {
+      // 已在章节底部：交由外壳翻章
+      if (max - y < 4) return false
+      win.scrollTo(0, Math.min(max, y + win.innerHeight * 0.9))
+      return true
+    }
+    if (y <= 4) return false
+    win.scrollTo(0, Math.max(0, y - win.innerHeight * 0.9))
+    return true
+  }
+
   applyStyle(style: ReaderStyle): void {
     this.style = style
     if (!this.idoc) return

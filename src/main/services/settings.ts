@@ -39,3 +39,10 @@ export function setSettings(patch: Partial<AppSettings>): AppSettings {
   } catch { /* 写入失败不影响运行 */ }
   return cache
 }
+
+/** 记录最近扫描的目录：去重置顶，上限 10 条（工具栏"最近扫描"菜单用） */
+export function recordScanFolder(folder: string): void {
+  const s = getSettings()
+  const folders = [folder, ...s.scanFolders.filter((f) => f !== folder)].slice(0, 10)
+  setSettings({ scanFolders: folders })
+}

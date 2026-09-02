@@ -311,6 +311,23 @@ class MobiEngine implements ReaderEngine {
     return true
   }
 
+  async scrollByScreen(dir: 1 | -1): Promise<boolean> {
+    const win = this.iframe?.contentWindow
+    const doc = this.iframe?.contentDocument
+    if (!win || !doc) return false
+    const docEl = doc.documentElement
+    const max = docEl.scrollHeight - win.innerHeight
+    const y = win.scrollY
+    if (dir > 0) {
+      if (max - y < 4) return false
+      win.scrollTo(0, Math.min(max, y + win.innerHeight * 0.9))
+      return true
+    }
+    if (y <= 4) return false
+    win.scrollTo(0, Math.max(0, y - win.innerHeight * 0.9))
+    return true
+  }
+
   applyStyle(style: ReaderStyle): void {
     this.style = style
     // 重新渲染当前章节以应用样式，并保持滚动位置

@@ -12,6 +12,7 @@
 import { app, BrowserWindow, dialog, Menu, session, shell } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { IPC } from '../shared/types'
 import { log } from './logger'
 import { closeDb, getDb } from './db/database'
 import { registerIpcHandlers } from './ipc/register'
@@ -35,13 +36,28 @@ const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_e, argv) => {
     // 用户尝试启动第二个实例时，聚焦已有窗口
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
     }
+    // 第二实例携带电子书路径（文件关联双击 / 拖到快捷方式）：转发给现有窗口导入
+    const paths = ebookPathsFromArgv(argv)
+    if (paths.length && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.EventImportRequest, paths)
+    }
   })
+}
+
+/** 可导入的电子书扩展名（与 IMPORT_EXTS 对齐，不含 txt：避免误关联普通文本） */
+const OPEN_EXTS = new Set(['.epub', '.pdf', '.mobi', '.azw'])
+
+/** 从命令行参数中筛出电子书路径（Windows 文件关联会把文件路径追加到 argv） */
+function ebookPathsFromArgv(argv: string[]): string[] {
+  return argv
+    .slice(1)
+    .filter((a) => !a.startsWith('-') && OPEN_EXTS.has(path.extname(a).toLowerCase()))
 }
 
 /* ------------------------------ 安全策略 ------------------------------ */
@@ -128,6 +144,11 @@ function createMainWindow(): void {
   win.once('ready-to-show', () => {
     log.info(`[perf] 窗口首帧就绪(ready-to-show): ${Math.round(performance.now() - BOOT_T0)}ms`)
     if (!isE2E) win.show()
+    // 启动参数携带电子书路径（文件关联双击打开）：通知渲染进程导入
+    const openPaths = ebookPathsFromArgv(process.argv)
+    if (openPaths.length && !mainWindow?.isDestroyed()) {
+      mainWindow!.webContents.send(IPC.EventImportRequest, openPaths)
+    }
   })
 
   if (isDev && !isE2E) {

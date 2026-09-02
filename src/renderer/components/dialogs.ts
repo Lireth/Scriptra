@@ -6,7 +6,10 @@ import type { Book } from '../../shared/types'
 import { el } from '../util'
 import { toast } from './toast'
 
-function buildOverlay(title: string): { overlay: HTMLDivElement; body: HTMLDivElement; close: () => void } {
+function buildOverlay(
+  title: string,
+  onDismiss?: () => void,
+): { overlay: HTMLDivElement; body: HTMLDivElement; close: () => void } {
   const overlay = el('div', 'modal-overlay')
   const dialog = el('div', 'modal')
   const header = el('div', 'modal-header')
@@ -20,17 +23,50 @@ function buildOverlay(title: string): { overlay: HTMLDivElement; body: HTMLDivEl
   dialog.appendChild(body)
   overlay.appendChild(dialog)
   document.getElementById('overlay-root')?.appendChild(overlay)
-  const close = () => overlay.remove()
-  closeBtn.onclick = close
-  overlay.onmousedown = (e) => {
-    if (e.target === overlay) close()
+
+  let closed = false
+  const close = () => {
+    if (closed) return
+    closed = true
+    overlay.remove()
   }
+  // 非按钮路径关闭（× / 遮罩 / Esc）时通知调用方收尾（如 resolve 取消值）
+  const dismiss = () => {
+    if (closed) return
+    close()
+    onDismiss?.()
+  }
+  closeBtn.onclick = dismiss
+  overlay.onmousedown = (e) => {
+    if (e.target === overlay) dismiss()
+  }
+  // 键盘支持：Esc 关闭；Enter 触发主操作按钮（textarea 内换行不劫持）
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      dismiss()
+      return
+    }
+    if (e.key === 'Enter' && (e.target as HTMLElement)?.tagName !== 'TEXTAREA') {
+      const btn = dialog.querySelector<HTMLButtonElement>('.modal-actions .btn-primary')
+        ?? dialog.querySelector<HTMLButtonElement>('.modal-actions .btn-danger')
+      if (btn) {
+        e.preventDefault()
+        e.stopPropagation()
+        btn.click()
+      }
+    }
+  })
+  // 初始焦点落在首个输入控件上，保证键盘事件进入 overlay；无输入控件时聚焦容器
+  overlay.tabIndex = -1
+  const firstInput = body.querySelector<HTMLElement>('input, select, textarea')
+  ;(firstInput ?? overlay).focus()
   return { overlay, body, close }
 }
 
 export function confirmDialog(message: string, danger = true): Promise<boolean> {
   return new Promise((resolve) => {
-    const { body, close } = buildOverlay('确认操作')
+    const { body, close } = buildOverlay('确认操作', () => resolve(false))
     body.appendChild(el('p', 'confirm-text', message))
     const row = el('div', 'modal-actions')
     const cancel = el('button', 'btn')
@@ -57,7 +93,7 @@ export interface MetaEditResult {
 
 export function editMetadataDialog(book: Book, categories: string[]): Promise<MetaEditResult | null> {
   return new Promise((resolve) => {
-    const { body, close } = buildOverlay('编辑书籍信息')
+    const { body, close } = buildOverlay('编辑书籍信息', () => resolve(null))
 
     const field = (label: string, input: HTMLElement) => {
       const row = el('div', 'form-row')
@@ -163,7 +199,7 @@ export function showHelpDialog(): void {
     ['Delete', '删除选中的书'],
     ['F1', '快捷键帮助'],
     ['阅读器', ''],
-    ['← / →（或 PgUp / PgDn）', '上一章 / 下一章（PDF：翻页）'],
+    ['← / →（或 PgUp / PgDn）', '章内滚动一屏，到边界翻章（PDF：翻页）'],
     ['Ctrl + D', '添加书签'],
     ['Ctrl + T', '目录面板'],
     ['Ctrl + B', '批注面板'],

@@ -14,6 +14,7 @@ export interface ScriptraApi {
 
   importFiles(paths: string[]): Promise<ImportOutcome>
   scanFolder(folder: string): Promise<ImportOutcome>
+  pathForFile(file: File): string
   listBooks(query: BookQuery): Promise<Book[]>
   getBook(id: string): Promise<Book | null>
   updateBook(id: string, patch: BookUpdatePatch): Promise<Book>
@@ -40,6 +41,8 @@ export interface ScriptraApi {
   onImportProgress(handler: (payload: {
     current: number; total: number; path: string; stage: string
   }) => void): () => void
+
+  onImportRequest(handler: (paths: string[]) => void): () => void
 }
 
 declare global {

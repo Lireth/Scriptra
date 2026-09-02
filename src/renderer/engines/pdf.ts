@@ -285,7 +285,8 @@ class PdfEngine implements ReaderEngine {
       const task = page.render({
         canvasContext: ctx,
         viewport,
-        background: this.style.theme === 'dark' ? '#2b2d31' : '#ffffff',
+        // 画布恒为白底；夜间主题由 CSS 反色实现（见 .pdf-dark 规则），无需差异化渲染
+        background: '#ffffff',
       })
       slot.renderTask = task
       await task.promise
@@ -431,9 +432,8 @@ class PdfEngine implements ReaderEngine {
     this.style = style
     const t = READER_THEMES[style.theme] ?? READER_THEMES.light
     this.scroller.style.background = t.bg
-    for (const slot of this.slots) {
-      if (slot.rendered) void this.renderPage(slot, this.pageWidthPx())
-    }
+    // 夜间主题经 CSS 反色实现（.pdf-dark），切换主题无需重绘页面
+    this.scroller.classList.toggle('pdf-dark', style.theme === 'dark')
   }
 
   applyAnnotations(list: Annotation[]): void {

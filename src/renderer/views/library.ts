@@ -136,16 +136,41 @@ export class LibraryView {
     toggle.appendChild(listBtn)
     toolbar.appendChild(toggle)
 
+    // 扫描按钮 + 最近扫描目录下拉（O8）
+    const scanWrap = el('div', 'scan-wrap')
     const scanBtn = el('button', 'btn', '扫描文件夹')
     scanBtn.id = 'btn-scan'
     scanBtn.onclick = () => void this.scanFolder()
+    const caret = el('button', 'btn scan-caret')
+    caret.id = 'btn-scan-history'
+    caret.textContent = '▾'
+    caret.title = '最近扫描的文件夹'
+    caret.onclick = () => void this.showScanHistory(caret)
+    scanWrap.appendChild(scanBtn)
+    scanWrap.appendChild(caret)
     const importBtn = el('button', 'btn btn-primary', '导入')
     importBtn.id = 'btn-import'
     importBtn.onclick = () => void this.importFiles()
-    toolbar.appendChild(scanBtn)
+    toolbar.appendChild(scanWrap)
     toolbar.appendChild(importBtn)
 
     return toolbar
+  }
+
+  /** 最近扫描目录菜单：一键重扫历史目录 */
+  private async showScanHistory(anchor: HTMLElement): Promise<void> {
+    const s = await window.scriptra.getSettings()
+    const items: MenuItem[] = s.scanFolders.map((f) => ({
+      label: f.length > 42 ? '…' + f.slice(-41) : f,
+      action: () => void this.runImport(() => window.scriptra.scanFolder(f), 0),
+    }))
+    items.push({
+      label: '选择其他文件夹…',
+      separatorBefore: items.length > 0,
+      action: () => void this.scanFolder(),
+    })
+    const r = anchor.getBoundingClientRect()
+    openContextMenu(r.left, r.bottom + 4, items)
   }
 
   private setViewMode(mode: 'grid' | 'list', gridBtn: HTMLElement, listBtn: HTMLElement): void {
@@ -437,6 +462,11 @@ export class LibraryView {
   async importFiles(): Promise<void> {
     const paths = await window.scriptra.pickFiles()
     if (!paths?.length) return
+    await this.importPaths(paths)
+  }
+
+  /** 按给定路径列表导入（拖拽 / 文件关联入口共用） */
+  async importPaths(paths: string[]): Promise<void> {
     await this.runImport(() => window.scriptra.importFiles(paths), paths.length)
   }
 

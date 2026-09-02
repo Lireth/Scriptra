@@ -18,7 +18,7 @@ import {
 import {
   buildOpenPayload, closeSessionFor, coverDataUrl, deleteBooks, getEpubResource, importFiles, scanFolder,
 } from '../services/library'
-import { getSettings, setSettings } from '../services/settings'
+import { getSettings, recordScanFolder, setSettings } from '../services/settings'
 import {
   ANN_TYPES, annotationLocator, bool, FORMATS, importPaths, int, oneOf, optStr,
   progressDetail, ratio, STATUSES, str, strArray,
@@ -82,8 +82,13 @@ export function registerIpcHandlers(): void {
   handle(IPC.LibraryImport, (event, paths: string[]) =>
     importFiles(importPaths(paths), event.sender) as Promise<ImportOutcome>)
 
-  handle(IPC.LibraryScan, (event, folder: string) =>
-    scanFolder(str(folder, 1024), event.sender) as Promise<ImportOutcome>)
+  handle(IPC.LibraryScan, async (event, folder: string) => {
+    const f = str(folder, 1024)
+    const r = await scanFolder(f, event.sender) as ImportOutcome
+    // 扫描成功后记录历史目录，供工具栏一键重扫
+    recordScanFolder(f)
+    return r
+  })
 
   handle(IPC.LibraryList, (_e, query: BookQuery) => listBooks(sanitizeQuery(query)))
 

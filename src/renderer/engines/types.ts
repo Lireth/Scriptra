@@ -56,6 +56,11 @@ export interface ReaderEngine {
   focusAnnotation?(annId: string): boolean
   nextChapter(): Promise<boolean>
   prevChapter(): Promise<boolean>
+  /**
+   * 章内滚动一屏（阅读型引擎实现）。返回 false 表示已到章节边界，
+   * 外壳据此衔接翻章；未实现的引擎（PDF）由外壳沿用翻章语义。
+   */
+  scrollByScreen?(dir: 1 | -1): Promise<boolean>
   destroy(): void
   /** 窗口尺寸变化（含最大化/还原）时触发，引擎按需重排 */
   onResize?(): void
